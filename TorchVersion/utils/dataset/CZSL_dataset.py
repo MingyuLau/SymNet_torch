@@ -18,14 +18,14 @@ except (ValueError, ImportError):
 
 class CompositionDataset(torch.utils.data.Dataset):
 
-    def __init__(self, name, root, phase, feat_file, split='compositional-split', with_image=False, obj_pred=None, transform_type='normal'):
+    def __init__(self, name, root, phase, feat_file, split='compositional-split', with_image=False, obj_pred=None):
         self.root = root
         self.phase = phase
         self.split = split
         self.with_image = with_image
 
         self.feat_dim = None
-        self.transform = data_utils.imagenet_transform(phase, transform_type)
+        self.transform = data_utils.imagenet_transform(phase)
         self.loader = data_utils.ImageLoader(self.root+'/images/')
 
 
@@ -38,15 +38,18 @@ class CompositionDataset(torch.utils.data.Dataset):
 
         # pair = (attr, obj)
         self.attrs, self.objs, self.pairs, self.train_pairs, self.test_pairs = self.parse_split()
+        assert len(set(self.train_pairs)&set(self.test_pairs))==0, 'train and test are not mutually exclusive'
+
+        self.train_data, self.test_data = self.get_split_info()
+        self.data = self.train_data if self.phase=='train' else self.test_data   # list of [img_name, attr, obj, attr_id, obj_id, feat]
+        print ('#images = %d'%len(self.data))
+
+
         self.attr2idx = {attr: idx for idx, attr in enumerate(self.attrs)}
         self.obj2idx = {obj: idx for idx, obj in enumerate(self.objs)}
         self.pair2idx = {pair: idx for idx, pair in enumerate(self.pairs)}
 
 
-        self.train_data, self.test_data = self.get_split_info()
-        
-        self.data = self.train_data if self.phase=='train' else self.test_data   # list of [img_name, attr, obj, attr_id, obj_id, feat]
-        print ('#images = %d'%len(self.data))
         
         
         # return {object: all attrs that occur with obj}
@@ -89,6 +92,7 @@ class CompositionDataset(torch.utils.data.Dataset):
 
         
     def get_split_info(self):
+        
         data = torch.load(self.root+'/metadata.t7')
         train_pair_set = set(self.train_pairs)
         test_pair_set = set(self.test_pairs)

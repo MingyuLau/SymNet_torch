@@ -17,20 +17,22 @@ except (ValueError, ImportError):
 
 class CompositionDataset(torch.utils.data.Dataset):
 
-    def __init__(self, name, root, phase, split='compositional-split'):
+    def __init__(self, name, root, phase, split='compositional-split', obj_pred=None):
         self.root = root
         self.phase = phase
         self.split = split
 
         self.feat_dim = None
-        self.transform = imagenet_transform(phase)
-        self.loader = ImageLoader(self.root+'/images/')
+        self.transform = data_utils.imagenet_transform(phase)
+        self.loader = data_utils.ImageLoader(self.root+'/images/')
 
         self.attrs, self.objs, self.pairs, self.train_pairs, self.test_pairs = self.parse_split()
         assert len(set(self.train_pairs)&set(self.test_pairs))==0, 'train and test are not mutually exclusive'
 
         self.train_data, self.test_data = self.get_split_info()
-        self.data = self.train_data if self.phase=='train' else self.test_data
+        self.data = self.train_data if self.phase=='train' else self.test_data   # list of [img_name, attr, obj, attr_id, obj_id, feat]
+        print ('#images = %d'%len(self.data))
+
 
         self.attr2idx = {attr: idx for idx, attr in enumerate(self.attrs)}
         self.obj2idx = {obj: idx for idx, obj in enumerate(self.objs)}
@@ -38,17 +40,48 @@ class CompositionDataset(torch.utils.data.Dataset):
 
         print ('# train pairs: %d | # test pairs: %d'%(len(self.train_pairs), len(self.test_pairs)))
 
-        # fix later -- affordance thing
         # return {object: all attrs that occur with obj}
-        self.obj_affordance = {}
-        self.train_obj_affordance = {}
+        self.obj_affordance_mask = []
         for _obj in self.objs:
-            candidates = [attr for (_, attr, obj) in self.train_data+self.test_data if obj==_obj]
-            self.obj_affordance[_obj] = list(set(candidates))
-
-            candidates = [attr for (_, attr, obj) in self.train_data if obj==_obj]
-            self.train_obj_affordance[_obj] = list(set(candidates))
+            candidates = [attr for (_,attr,obj,_,_,_) in self.train_data+self.test_data if obj==_obj]
+            affordance = set(candidates)
+            mask = [1 if x in affordance else 0   for x in self.attrs]
+            self.obj_affordance_mask.append(mask)
+        # self.obj_affordance = {}
+        # self.train_obj_affordance = {}
+        # for _obj in self.objs:
+        #     candidates = [attr for (_, attr, obj) in self.train_data+self.test_data if obj==_obj]
+        #     self.obj_affordance[_obj] = list(set(candidates))
         
+
+        #     candidates = [attr for (_, attr, obj) in self.train_data if obj==_obj]
+        #     self.train_obj_affordance[_obj] = list(set(candidates))
+
+
+
+        # negative image pool
+        samples_grouped_by_obj = [[] for _ in range(len(self.objs))]
+        for i,x in enumerate(self.train_data):
+            samples_grouped_by_obj[x[4]].append(i)
+
+        self.neg_pool = []  # [obj_id][attr_id] => list of sample id
+        for obj_id in range(len(self.objs)):
+            self.neg_pool.append([])
+            for attr_id in range(len(self.attrs)):
+                self.neg_pool[obj_id].append(
+                    [i for i in samples_grouped_by_obj[obj_id] if 
+                        self.train_data[i][3] != attr_id ]
+                )
+
+        if obj_pred is None:
+            self.obj_pred = None
+        else:
+            obj_pred_path = osp.join(cfg.ROOT_DIR, 'data/obj_scores', obj_pred)
+            print("Loading object prediction from %s"%osp.basename(obj_pred_path))
+            with open(obj_pred_path, 'rb') as fp:
+                self.obj_pred = np.array(pickle.load(fp), dtype=np.float32)
+
+
     def get_split_info(self):
 
         data = torch.load(self.root+'/metadata.t7')
