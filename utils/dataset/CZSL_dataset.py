@@ -1,60 +1,23 @@
 import numpy as np
-import torch.utils.data as tdata
-import torch
-import torchvision.transforms as transforms
-from PIL import Image
-import glob
-import os
+import torch, torchvision
+import os, logging, pickle, json
 import tqdm
-import torchvision.models as tmodels
-import torch.nn as nn
-from torch.autograd import Variable
-import torch
-import bz2
-from utils import utils
-import h5py
-import models
-import itertools
-import os 
-import collections
-import scipy.io
-from sklearn.model_selection import train_test_split
+import os.path as osp
+
+try:
+    from . import data_utils
+    from .. import config as cfg
+except (ValueError, ImportError):
+    import data_utils
+    import sys
+    sys.path.append("..")
+    import config as cfg
 
 
-class ImageLoader:
-    def __init__(self, root):
-        self.img_dir = root
 
-    def __call__(self, img):
-        file = '%s/%s'%(self.img_dir, img)
-        img = Image.open(file).convert('RGB')
-        return img
+class CompositionDataset(torch.utils.data.Dataset):
 
-def imagenet_transform(phase):
-    mean, std = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
-
-    if phase=='train':
-        transform = transforms.Compose([
-                        transforms.RandomResizedCrop(224),
-                        transforms.RandomHorizontalFlip(),
-                        transforms.ToTensor(),
-                        transforms.Normalize(mean, std)
-                    ])
-    elif phase=='test':
-        transform = transforms.Compose([
-                        transforms.Resize(256),
-                        transforms.CenterCrop(224),
-                        transforms.ToTensor(),
-                        transforms.Normalize(mean, std)
-                    ])
-
-    return transform
-
-#------------------------------------------------------------------------------------------------------------------------------------#
-
-class CompositionDataset(tdata.Dataset):
-
-    def __init__(self, root, phase, split='compositional-split'):
+    def __init__(self, name, root, phase, split='compositional-split'):
         self.root = root
         self.phase = phase
         self.split = split
@@ -184,8 +147,8 @@ class CompositionDatasetActivations(CompositionDataset):
 
         data = self.train_data+self.test_data
         transform = imagenet_transform('test')
-        feat_extractor = tmodels.resnet18(pretrained=True)
-        feat_extractor.fc = nn.Sequential()
+        feat_extractor = torchvision.models.resnet18(pretrained=True)
+        feat_extractor.fc = torch.nn.Sequential()
         feat_extractor.eval().cuda()
 
         image_feats = []

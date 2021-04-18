@@ -16,7 +16,7 @@ except (ValueError, ImportError):
 
 
 
-class CompositionDatasetActivations(torch.utils.data.Dataset):
+class CompositionDataset(torch.utils.data.Dataset):
 
     def __init__(self, name, root, phase, feat_file, split='compositional-split', with_image=False, obj_pred=None, transform_type='normal'):
         self.root = root
