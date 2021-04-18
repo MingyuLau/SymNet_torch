@@ -10,10 +10,6 @@ from torch.optim import lr_scheduler
 
 from utils import config as cfg
 
-if cfg.ROOT_DIR.startswith('/home'):
-    import torch
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # set tensorflow logger to WARNING level
-
 
 class BaseSolver(object):
     root_logger = logging.getLogger('solver')
@@ -71,9 +67,7 @@ class BaseSolver(object):
         decay_stepsize = len(self.train_dataloader) * self.args.lr_decay_step
 
         if self.args.lr_decay_type == 'no':
-            def lambda_rule(epoch):
-                return 1.0
-            scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_rule)
+            scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=(lambda epoch: 1.0))
         elif self.args.lr_decay_type == 'exp':
             scheduler = lr_scheduler.StepLR(optimizer, step_size=decay_stepsize, gamma=self.args.lr_decay_rate)
         elif self.args.lr_decay_type == 'cos':

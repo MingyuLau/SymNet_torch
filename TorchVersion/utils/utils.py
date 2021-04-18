@@ -60,7 +60,7 @@ class Embedder:
     __init__(self)
     """
 
-    def __init__(self, vec_type, vocab, data, device=torch.device('cpu')):
+    def __init__(self, vec_type, vocab, data):
         self.vec_type = vec_type
         self.device = device
 
@@ -115,6 +115,7 @@ def one_hot(tensor, depth, axis):
 
 
 def repeat_tensor(tensor, axis, multiple):
+    raise NotImplementedError("you can use torch.repeat()")
     """e.g. (1,2,3)x3 = (1,1,1,2,2,2,3,3,3)"""
     
     result_shape = list(tensor.shape)
@@ -134,6 +135,7 @@ def repeat_tensor(tensor, axis, multiple):
 
 def tile_tensor(tensor, axis, multiple):
     """e.g. (1,2,3)x3 = (1,2,3,1,2,3,1,2,3)"""
+    raise NotImplementedError("you can use torch.tile()")
     mul = [1] * len(tensor.shape)
     mul[axis] = multiple
 
