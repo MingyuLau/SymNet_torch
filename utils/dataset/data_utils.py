@@ -5,6 +5,8 @@ import scipy.io as sio
 import os.path as osp
 import numpy as np
 
+
+
 class ImageLoader:
     def __init__(self, root):
         self.img_dir = root
@@ -24,7 +26,7 @@ def imagenet_transform(phase):
                         transforms.ToTensor(),
                         transforms.Normalize(mean, std)
                     ])
-    elif phase=='test':
+    elif phase in ['test', 'val']:
         transform = transforms.Compose([
                         transforms.Resize(256),
                         transforms.CenterCrop(224),
