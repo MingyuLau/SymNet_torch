@@ -24,17 +24,6 @@ class BaseSolver(object):
     def logger(self, suffix):
         return self.root_logger.getChild(suffix)
 
-    def clear_folder(self):
-        """clear weight and log dir"""
-        logger = self.logger('clear_folder')
-
-        for f in os.listdir(self.log_dir):
-            logger.warning('Deleted log file ' + f)
-            os.remove(os.path.join(self.log_dir, f))
-
-        for f in os.listdir(self.weight_dir):
-            logger.warning('Deleted weight file ' + f)
-            os.remove(os.path.join(self.weight_dir, f))
 
     def snapshot(self, model, iter, filenames=None):
         """save checkpoint"""
@@ -50,17 +39,7 @@ class BaseSolver(object):
 
         self.logger('snapshot').info('Wrote snapshot to: {}'.format(filename))
 
-    def initialize(self, model, iter):
-        """weight initialization"""
-        logger = self.logger('initialize')
 
-        if self.trained_weight is None:
-            pass
-        else:
-            logger.info('Restoring whole model snapshots from {:s}'.format(self.trained_weight))
-            filename = 'snapshot_epoch_{}.ckpt'.format(iter)
-            pth = os.path.join(self.weight_dir, filename)
-            model.load_state_dict(torch.load(pth))
 
     def set_scheduler(self, optimizer):
         """ return a learning rate scheduler """
@@ -90,21 +69,4 @@ class BaseSolver(object):
             return NotImplementedError('learning rate policy [%s] is not implemented', self.args.lr_decay_type)
         return scheduler
 
-    def set_optimizer(self, model, lr):
-        optimizer = None
-        if self.args.optimizer == 'sgd':
-            optimizer = torch.optim.SGD(model.parameters(), lr=lr)
-        elif self.args.optimizer == 'momentum':
-            optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
-            logger.info('Using momentum optimizer')
-        elif self.args.optimizer == 'adam':
-            optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-            logger.info('Using Adam optimizer')
-        elif self.args.optimizer == 'adamw':
-            optimizer = torch.AdamW(model.parameters(), eps=5e-5, lr=lr)
-            logger.info('Using AdamW optimizer')
-        elif self.args.optimizer == 'rmsprop':
-            optimizer = torch.RMSprop(model.parameters(), lr=lr)
-            logger.info('Using RMSProp optimizer')
 
-        return optimizer

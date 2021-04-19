@@ -1,5 +1,7 @@
 import time
 import cv2
+import parse
+import re
 import os
 import argparse
 import os.path as osp
@@ -41,14 +43,11 @@ def display_args(args, logger, verbose=False):
 
 
 
-def duplication_check(args):
+def duplication_check(args, log_dir):
     if args.force:
         return
-    elif args.trained_weight is None or args.trained_weight.split('/')[0] != args.name:
-        assert not osp.exists(osp.join(cfg.WEIGHT_ROOT_DIR, args.name)), \
-            "weight dir with same name exists (%s)"%(args.name)
-        assert not osp.exists(osp.join(cfg.LOG_ROOT_DIR, args.name)), \
-            "log dir with same name exists (%s)"%(args.name)
+    elif args.trained_weight is None or not utils.CheckpointPath.in_dir(args.trained_weight, log_dir)
+        assert not osp.exists(log_dir, "log dir with same name exists (%s)"%log_dir)
         
 
 def formated_czsl_result(report):
@@ -156,5 +155,53 @@ def activation_func(name):
     elif name == "relu":
         return tf.nn.relu
     else:
-        raise NotImplementedError("activation function %s not implemented"%name)
+        raise NotImplementedError("Activation function {} is not implemented".format(name))
 
+
+def get_optimizer(optim_type, lr, params):
+    if optim_type == 'sgd':
+        logger = logging.getLogger('utils.get_optimizer')
+        logger.info('Using {} optimizer'.format(optim_type))
+
+    if optim_type == 'sgd':
+        return torch.optim.SGD(params, lr=lr)
+    elif optim_type == 'momentum':
+        return torch.optim.SGD(params, lr=lr, momentum=0.9)
+    elif optim_type == 'adam':
+        return torch.optim.Adam(params, lr=lr)
+    elif optim_type == 'adamw':
+        return torch.AdamW(params, eps=5e-5, lr=lr)
+    elif optim_type == 'rmsprop':
+        return torch.RMSprop(params, lr=lr)
+    else:
+        raise NotImplementedError("{} optimizer is not implemented".format(optim_type))
+
+    
+def clear_folder(dirname):
+    """clear weight and log dir"""
+    logger = self.logger('clear_folder')
+
+    for f in os.listdir(dirname):
+        logger.warning('Deleted log file ' + f)
+        os.remove(os.path.join(dirname, f))
+
+
+
+class CheckpointPath(object):
+    TEMPLATE = "{:s}/checkpoint_ep{:d}.pt"
+    EPOCH_PATTERN = "checkpoint_ep([0-9]*).pt"
+
+    @classmethod
+    def compose(log_dir: str, epoch: int) -> str:
+        return TEMPLATE.format(log_dir, epoch)
+
+    @classmethod
+    def decompose(ckpt_path: str) -> (str, int):
+        log_dir = osp.dirname(ckpt_path)
+        epoch = re.match(EPOCH_PATTERN, osp.basename(ckpt_path)).group(0)
+        return log_dir, int(epoch)
+    
+    @classmethod
+    def in_dir(ckpt_path: str, log_dir: str) -> bool:
+        ckpt_log_dir, _ = decompose(ckpt_path)
+        return osp.samefile(ckpt_log_dir, log_dir)
