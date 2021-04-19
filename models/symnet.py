@@ -1,142 +1,135 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
-import numpy as np
-import os, logging, torch, json
-import os.path as osp
-from collections import OrderedDict
-
-from network.base_network import *
-# from base_network import *
-from utils import utils
-from utils import config as cfg
-
-from torch.utils.tensorboard import SummaryWriter
+import torch
+import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
+import logging
+
+from utils import utils, aux_data
+from .base_models import *
+
+class Transformer(nn.Module):
+    def __init__(self, attr_emb_dim, args, name):
+        super(Transformer, self).__init__()
+        self.name = name
+
+        if not args.no_attention:
+            self.fc_attention = MLP(attr_emb_dim, args.rep_dim, hidden_layers=self.args.fc_att, batchnorm=args.batchnorm)
+        else:
+            self.fc_attention = None
+
+        self.fc_out = MLP(args.rep_dim + attr_emb_dim, args.rep_dim, args, hidden_layers=self.args.fc_compress, batchnorm=args.batchnorm)
+
+    def forward(self, rep, v_attr):
+        if self.fc_attention:
+            attention = self.fc_attention(v_attr)
+            attention = torch.sigmoid(attention)
+            rep = attention * rep + rep
+
+        hidden = torch.cat((rep, v_attr), dim=1)
+        output = self.fc_out(hidden)
+
+        return output
+
+    def string(self):
+        return self.name
 
 
-class NetWork(BaseNetwork):
-    # root_logger = logging.getLogger("network %s" % __file__.split('/')[-1])
 
-    def __init__(self, dataloader, args, feat_dim, device=torch.device('cpu')):
-        super().__init__(dataloader, args, feat_dim, device)
+class MLPClassifier(nn.Module):
+    def __init__(self, num_class, args, name):
+        super(MLPClassifier, self).__init__()
+        self.name = name
+        self.mlp = MLP(args.rep_dim, num_class, args, hidden_layers=args.fc_cls, batchnorm=args.batchnorm)
 
-        self.dset = self.dataloader.dataset
-        self.attr_embedder = utils.Embedder(args.wordvec, self.dset.attrs, args.data, self.device)
+    def forward(self, emb):
+        score = self.mlp(emb)
+        prob = F.softmax(score, 1)
+        return score_A, prob_A
+
+    def string(self):
+        return self.name
+
+
+class Model(nn.Module):
+    def __init__(self, dataset, args):
+        super(Model, self).__init__()
+
+        self.args = args
+
+        self.num_obj  = len(dataset.objs)
+        self.num_attr = len(dataset.attrs)
+
+        self.attr_embedder = utils.Embedder(args.wordvec, dataset.attrs, args.data)
         self.emb_dim = self.attr_embedder.emb_dim  # dim of wordvec (attr or obj)
 
-        self.rep_embedder = MLP(feat_dim, args.rep_dim, args, is_training=True,
-                                name="embedder", hidden_layers=[])
+        self.rep_embedder = MLP(dataset.feat_dim, args.rep_dim, hidden_layers=[], batchnorm=args.batchnorm)
 
-        emb_feat = None
-        attr_emb_feat = None
-        for batch_ind, blobs in enumerate(dataloader):
-            pos_attr_id = torch.from_numpy(blobs[1])
-            pos_image_feat = torch.from_numpy(blobs[4])
+        self.CoN = Transformer(self.emb_dim, args, 'CoN')
+        self.DeCoN = Transformer(self.emb_dim, args, 'DeCoN')
 
-            pos_attr_emb = self.attr_embedder.get_embedding(pos_attr_id)
-            pos_img = self.rep_embedder(pos_image_feat)  # (bz,dim)
+        self.attr_cls = Classifier(self.num_attr, args, "attr_cls")
+        self.obj_cls = Classifier(self.num_obj, args, "obj_cls")
 
-            emb_feat = pos_img.shape[1]
-            attr_emb_feat = pos_attr_emb.shape[1]
-            break
+        if args.loss_class_weight:
+            attr_loss_wgt, obj_loss_wgt = aux_data.load_loss_weight(args.data)
+            attr_loss_wgt= torch.tensor(attr_loss_wgt, dtype=torch.float32).cuda()
+            obj_loss_wgt= torch.tensor(obj_loss_wgt, dtype=torch.float32).cuda()
+            self.attr_bce = BCELossWithLabel(self.num_attr, weight=attr_loss_wgt)
+            self.obj_bce = BCELossWithLabel(self.num_obj, weight=obj_loss_wgt)
+        else:
+            self.attr_bce = BCELossWithLabel(self.num_attr)
+            self.obj_bce = BCELossWithLabel(self.num_obj)
 
-        self.CoN = NetWork.Transformer(attr_emb_feat, args, True, name='CoN')
-        self.DeCoN = NetWork.Transformer(attr_emb_feat, args, True, name='DeCoN')
+        self.dist_func = Distance(args.distance_metric)
+        self.dist_loss = DistanceLoss(args.distance_metric)
+        self.triplet_loss = TripletMarginLoss(args.triplet_margin, args.distance_metric)
 
-        self.attr_cls = NetWork.Classifier(emb_feat, self.num_attr, args
-                                           , is_training=True, name="attr_cls")
-        self.obj_cls = NetWork.Classifier(emb_feat, self.num_obj, args,
-                                          is_training=True, name="obj_cls")
 
-    class Transformer(nn.Module):
-        def __init__(self, attr_emb_feat, args, is_training, name):
-            super(NetWork.Transformer, self).__init__()
-            self.v_attr_emb_feat = attr_emb_feat
-            self.is_training = is_training
-            self.name = name
-            self.args = args
+    def forward(self, batch):
+        losses = {}
 
-            self.fc_attention = MLP(attr_emb_feat, self.args.rep_dim, args, is_training,
-                                    name='fc_attention', hidden_layers=self.args.fc_att)
-            self.fc_out = MLP(args.rep_dim + attr_emb_feat, self.args.rep_dim, args, is_training,
-                              name='fc_out', hidden_layers=self.args.fc_compress)
-
-        def forward(self, rep, v_attr):
-            if not self.args.no_attention:
-                attention = self.fc_attention(v_attr)
-                attention = torch.sigmoid(attention)
-                rep = attention * rep + rep
-
-            hidden = torch.cat((rep, v_attr), dim=1)
-            output = self.fc_out(hidden)
-
-            return output
-
-        def string(self):
-            return self.name
-
-    class Classifier(nn.Module):
-        def __init__(self, emb_feat, num_attr, args, is_training, name='classifier'):
-            super(NetWork.Classifier, self).__init__()
-            self.emb_feat = emb_feat
-            self.is_training = is_training
-            self.name = name
-
-            self.mlp = MLP(emb_feat, num_attr, args, is_training,
-                           "cls", hidden_layers=args.fc_cls)
-
-        def forward(self, emb):
-            score_A = self.mlp(emb)
-            prob_A = F.softmax(score_A, 1)
-
-            return score_A, prob_A
-
-        def string(self):
-            return self.name
-
-    def forward(self, blobs):
-        train_summary_op = OrderedDict()
-
-        pos_attr_id = torch.from_numpy(blobs[1]).to(self.device)
-        pos_obj_id = torch.from_numpy(blobs[2]).to(self.device)
-        pos_image_feat = torch.from_numpy(blobs[4]).to(self.device)
-        neg_attr_id = torch.from_numpy(blobs[6]).to(self.device)
-        neg_image_feat = torch.from_numpy(blobs[9]).to(self.device)
-
-        train_summary_op['sum/pos_image_feat'] = torch.sum(pos_image_feat)
-        train_summary_op['mean/pos_image_feat'] = torch.mean(pos_image_feat)
-
-        total_losses = []
-
+        pos_attr_id     = batch["pos_attr_id"]
+        pos_obj_id      = batch["pos_obj_id"]
+        pos_image_feat  = batch["pos_image_feat"]
+        neg_attr_id     = batch["neg_attr_id"]
+        neg_image_feat  = batch["neg_image_feat"]
         batchsize = pos_image_feat.shape[0]
 
         pos_attr_emb = self.attr_embedder.get_embedding(pos_attr_id)
         neg_attr_emb = self.attr_embedder.get_embedding(neg_attr_id)
 
-
-
         pos_img = self.rep_embedder(pos_image_feat)  # (bz,dim)
         neg_img = self.rep_embedder(neg_image_feat)  # (bz,dim)
-
-        train_summary_op['sum/pos_img'] = torch.sum(pos_img)
-        train_summary_op['mean/pos_img'] = torch.mean(pos_img)
 
         # rA = remove positive attribute A
         # aA = add positive attribute A
         # rB = remove negative attribute B
         # aB = add negative attribute B
-
         pos_aA = self.CoN(pos_img, pos_attr_emb)
         pos_aB = self.CoN(pos_img, neg_attr_emb)
         pos_rA = self.DeCoN(pos_img, pos_attr_emb)
         pos_rB = self.DeCoN(pos_img, neg_attr_emb)
 
+        # obj prediction
+        _, prob_pos_O = self.obj_cls(pos_img)
+
+        # attribute prediction (RMD)
         attr_emb = self.attr_embedder.get_embedding(np.arange(self.num_attr))
         # (#attr, dim_emb), wordvec of all attributes
-        tile_attr_emb = utils.tile_tensor(attr_emb, 0, batchsize)
+        tile_attr_emb = utils.tile_on(attr_emb, batchsize, 0)
         # (bz*#attr, dim_emb)
+        
+        repeat_img_feat = utils.repeat_on(pos_img, self.num_attr, 0)
+        # (bz*#attr, dim_rep)
+        feat_plus = self.CoN(repeat_img_feat, tile_attr_emb)
+        feat_minus = self.DeCoN(repeat_img_feat, tile_attr_emb)
+
+        prob_RMD_plus, prob_RMD_minus = self.RMD_prob(
+            feat_plus, feat_minus,
+            repeat_img_feat,
+            metric=self.args.rmd_metric)
+
+        prob_attr = (prob_RMD_plus+prob_RMD_minus)*0.5
 
         ########################## classification losses ######################
         # unnecessary to compute cls loss for neg_img
@@ -144,251 +137,154 @@ class NetWork(BaseNetwork):
         if self.args.lambda_cls_attr > 0:
             # original image
             _, prob_pos_A = self.attr_cls(pos_img)
-            train_summary_op['sum/prob_pos_A'] = torch.sum(torch.square(prob_pos_A))
-            train_summary_op['mean/prob_pos_A'] = torch.mean(torch.square(prob_pos_A))
-            loss_cls_pos_a = F.cross_entropy(prob_pos_A, pos_attr_id, weight=self.attr_weight)
-            # TODO: focal loss not implemented
+            losses["loss_cls_attr/pos_a"] = self.attr_bce(prob_pos_A, pos_attr_id)
 
             # after removing pos_attr
             _, prob_pos_rA_A = self.attr_cls(pos_rA)
-            loss_cls_pos_rA_a = F.cross_entropy(prob_pos_rA_A, pos_attr_id, weight=self.attr_weight)
-            # TODO: focal loss not implemented
-
-            # loss_cls_pos_rA_a = cross_entropy(
-            #     prob_pos_rA_A, pos_attr_id, self.num_attr,
-            #     target=0, weight=self.attr_weight, focal_loss=self.args.focal_loss)
+            losses["loss_cls_attr/pos_rA_a"] = self.attr_bce(prob_pos_rA_A, pos_attr_id, reverse=True)
 
             # rmd
-            repeat_img_feat = utils.repeat_tensor(pos_img, 0, self.num_attr)
-            # (bz*#attr, dim_rep)
-            feat_plus = self.CoN(repeat_img_feat, tile_attr_emb)
-            feat_minus = self.DeCoN(repeat_img_feat, tile_attr_emb)
+            losses["loss_cls_attr/rmd_plus"] = self.attr_bce(prob_RMD_plus, pos_attr_id)
+            losses["loss_cls_attr/rmd_minus"] = self.attr_bce(prob_RMD_minus, pos_attr_id)
 
-            prob_RMD_plus, prob_RMD_minus = self.RMD_prob(feat_plus, feat_minus,
-                                                          repeat_img_feat, is_training=True,
-                                                          metric=self.args.rmd_metric)
-
-            loss_cls_rmd_plus = F.cross_entropy(prob_RMD_plus, pos_attr_id, weight=self.attr_weight)
-            loss_cls_rmd_minus = F.cross_entropy(prob_RMD_minus, pos_attr_id, weight=self.attr_weight)
-            # TODO: focal loss not implemented
-
-            # loss_cls_rmd_plus = cross_entropy(
-            #     prob_RMD_plus, self.pos_attr_id, self.num_attr,
-            #     weight=self.attr_weight, focal_loss=self.args.focal_loss)
-            # loss_cls_rmd_minus = cross_entropy(
-            #     prob_RMD_minus, self.pos_attr_id, self.num_attr,
-            #     weight=self.attr_weight, focal_loss=self.args.focal_loss)
-
-            loss_cls_attr = self.args.lambda_cls_attr * sum([
-                loss_cls_pos_a, loss_cls_pos_rA_a,
-                loss_cls_rmd_plus, loss_cls_rmd_minus
+            # summary
+            losses["loss_cls_attr/total"] = sum([
+                losses["loss_cls_attr/pos_a"], 
+                losses["loss_cls_attr/pos_rA_a"],
+                losses["loss_cls_attr/rmd_plus"], 
+                losses["loss_cls_attr/rmd_minus"]
             ])
+        else:
+            losses["loss_cls_attr/total"] = 0
 
-            total_losses.append(loss_cls_attr)
-            train_summary_op['loss/loss_cls_attr'] = loss_cls_attr
-            train_summary_op['debug/loss_cls_pos_a'] = loss_cls_pos_a
-            train_summary_op['debug/loss_cls_pos_rA_a'] = loss_cls_pos_rA_a
-            train_summary_op['debug/loss_cls_rmd_plus'] = loss_cls_rmd_plus
-            train_summary_op['debug/loss_cls_rmd_minus'] = loss_cls_rmd_minus
 
         if self.args.lambda_cls_obj > 0:
             # original image
-            _, prob_pos_O = self.obj_cls(pos_img)
-            loss_cls_pos_o = F.cross_entropy(prob_pos_O, pos_obj_id, weight=self.obj_weight)
-            # loss_cls_pos_o = cross_entropy(
-            #     prob_pos_O, pos_obj_id, self.num_obj,
-            #     weight=self.obj_weight, focal_loss=self.args.focal_loss)
+            losses["loss_cls_obj/pos_o"] = self.obj_bce(prob_pos_O, pos_obj_id)
 
             # after removing pos_attr
             _, prob_pos_rA_O = self.obj_cls(pos_rA)
-            loss_cls_pos_rA_o = F.cross_entropy(prob_pos_rA_O, pos_obj_id, weight=self.obj_weight)
-            # loss_cls_pos_rA_o = cross_entropy(
-            #     prob_pos_rA_O, pos_obj_id, self.num_obj,
-            #     weight=self.obj_weight, focal_loss=self.args.focal_loss)
+            losses["loss_cls_obj/pos_rA_o"] = self.obj_bce(prob_pos_rA_O, pos_obj_id)
 
             # after adding neg_attr
             _, prob_pos_aB_O = self.obj_cls(pos_aB)
-            loss_cls_pos_aB_o = F.cross_entropy(prob_pos_aB_O, pos_obj_id, weight=self.obj_weight)
-            # loss_cls_pos_aB_o = cross_entropy(
-            #     prob_pos_aB_O, pos_obj_id, self.num_obj,
-            #     weight=self.obj_weight, focal_loss=self.args.focal_loss)
+            losses["loss_cls_obj/pos_aB_o"] = self.obj_bce(prob_pos_aB_O, pos_obj_id)
 
-            loss_cls_obj = self.args.lambda_cls_obj * sum([
-                loss_cls_pos_o,
-                loss_cls_pos_rA_o,
-                loss_cls_pos_aB_o
+
+            losses["loss_cls_obj/total"] = sum([
+                losses["loss_cls_obj/pos_o"],
+                losses["loss_cls_obj/pos_rA_o"],
+                losses["loss_cls_obj/pos_aB_o"]
             ])
+        else:
+            losses["loss_cls_obj/total"] = 0
 
-            total_losses.append(loss_cls_obj)
-            train_summary_op['loss/loss_cls_obj'] = loss_cls_obj
+
 
         ############################# symmetry loss ###########################
 
         if self.args.lambda_sym > 0:
-            loss_sym_pos = self.MSELoss(pos_aA, pos_img)
-            loss_sym_neg = self.MSELoss(pos_rB, pos_img)
+            losses["loss_sym/pos"] = self.dist_loss(pos_aA, pos_img)
+            losses["loss_sym/neg"] = self.dist_loss(pos_rB, pos_img)
 
-            loss_sym = self.args.lambda_sym * (loss_sym_pos + loss_sym_neg)
-            total_losses.append(loss_sym)
-            train_summary_op['loss/loss_sym'] = loss_sym
+            losses["loss_sym/total"] = (losses["loss_sym/pos"] + losses["loss_sym/neg"])
+        else:
+            losses["loss_sym/total"] = 0
+            
 
         ############################## axiom losses ###########################
         if self.args.lambda_axiom > 0:
             loss_clo = loss_inv = loss_com = 0
 
             # closure
-            if not self.args.remove_clo:
+            if self.args.remove_clo:
+                losses["loss_axiom/clo"] = 0
+            else:
                 pos_aA_rA = self.DeCoN(pos_aA, pos_attr_emb)
                 pos_rB_aB = self.CoN(pos_rB, neg_attr_emb)
-                loss_clo = self.MSELoss(pos_aA_rA, pos_rA) + \
-                           self.MSELoss(pos_rB_aB, pos_aB)
+                losses["loss_axiom/clo"] = self.dist_loss(pos_aA_rA, pos_rA) + \
+                           self.dist_loss(pos_rB_aB, pos_aB)
 
             # invertibility
-            if not self.args.remove_inv:
+            if self.args.remove_inv:
+                losses["loss_axiom/inv"] = 0
+            else:
                 pos_rA_aA = self.CoN(pos_rA, pos_attr_emb)
                 pos_aB_rB = self.DeCoN(pos_aB, neg_attr_emb)
-                loss_inv = self.MSELoss(pos_rA_aA, pos_img) + \
-                           self.MSELoss(pos_aB_rB, pos_img)
+                losses["loss_axiom/inv"] = self.dist_loss(pos_rA_aA, pos_img) + \
+                           self.dist_loss(pos_aB_rB, pos_img)
 
             # Commutativity
-            if not self.args.remove_com:
+            if self.args.remove_com:
+                losses["loss_axiom/com"] = 0
+            else:
                 pos_aA_rB = self.DeCoN(pos_aA, neg_attr_emb)
                 pos_rB_aA = self.CoN(pos_rB, pos_attr_emb)
-                loss_com = self.MSELoss(pos_aA_rB, pos_rB_aA)
+                losses["loss_axiom/com"] = self.dist_loss(pos_aA_rB, pos_rB_aA)
 
-            loss_axiom = self.args.lambda_axiom * (
-                    loss_clo + loss_inv + loss_com)
-            total_losses.append(loss_axiom)
+            losses["loss_axiom/total"] = (
+                    losses["loss_axiom/clo"] + losses["loss_axiom/inv"] + losses["loss_axiom/com"])
 
-            train_summary_op['loss/loss_axiom'] = loss_axiom
-            train_summary_op['loss/loss_clo'] = loss_clo
-            train_summary_op['loss/loss_inv'] = loss_inv
-            train_summary_op['loss/loss_com'] = loss_com
+        else:
+            losses["loss_axiom/total"] = 0
+                    
 
         ############################# triplet loss ############################
 
         if self.args.lambda_trip > 0:
-            pos_triplet = torch.mean(
-                self.triplet_margin_loss(pos_img, pos_aA, pos_rA))
-            neg_triplet = torch.mean(
-                self.triplet_margin_loss(pos_img, pos_rB, pos_aB))
+            losses["loss_trip/pos"] = self.triplet_loss(pos_img, pos_aA, pos_rA)
+            losses["loss_trip/neg"] = self.triplet_loss(pos_img, pos_rB, pos_aB)
 
-            loss_triplet = self.args.lambda_trip * (pos_triplet + neg_triplet)
-            total_losses.append(loss_triplet)
+            losses["loss_trip/total"] = (losses["loss_trip/pos"] + losses["loss_trip/neg"])
 
-            train_summary_op['loss/loss_triplet'] = loss_triplet
+        else:
+            losses["loss_trip/total"] = 0
 
         ############################### summary ###############################
-        loss = sum(total_losses)
-
-        train_summary_op['loss/loss_total'] = loss
-
-        return loss, train_summary_op
-
-    def test_step(self, blobs):
-        dset = self.dataloader.dataset
-        test_att = np.array([dset.attr2idx[attr] for attr, _ in dset.pairs])
-        test_obj = np.array([dset.obj2idx[obj] for _, obj in dset.pairs])
-
-        pos_image_feat = torch.from_numpy(blobs[4]).to(self.device)
-        test_attr_id = torch.from_numpy(test_att).to(self.device)
-        test_obj_id = torch.from_numpy(test_obj).to(self.device)
-        if self.args.obj_pred is not None:
-            pos_obj_prediction = torch.from_numpy(blobs[-1]).to(self.device)
-        batchsize = pos_image_feat.shape[0]
-
-        ################################ testing ##############################
-        with torch.no_grad():
-            pos_img = self.rep_embedder(pos_image_feat)
-        repeat_img_feat = utils.repeat_tensor(pos_img, 0, self.num_attr)
-        # (bz*#attr, dim_rep)
-
-        attr_emb = self.attr_embedder.get_embedding(np.arange(self.num_attr))
-        # (#attr, dim_emb), wordvec of all attributes
-        tile_attr_emb = utils.tile_tensor(attr_emb, 0, batchsize)
-        # (bz*#attr, dim_emb)
-
-        feat_plus = self.CoN(repeat_img_feat, tile_attr_emb)
-        feat_minus = self.DeCoN(repeat_img_feat, tile_attr_emb)
-
-        prob_A_rmd, prob_A_attr = self.RMD_prob(feat_plus, feat_minus,
-                                                repeat_img_feat, is_training=False, metric='rmd')
-
-        with torch.no_grad():
-            _, prob_A_fc = self.attr_cls(pos_img)
-            _, prob_O_fc = self.obj_cls(pos_img)
-
-        if self.args.obj_pred is None:
-            prob_O = prob_O_fc
-        else:
-            prob_O = pos_obj_prediction
-
-        test_a_onehot = one_hot(test_attr_id, depth=self.num_attr, device=self.device, axis=1)
-        test_o_onehot = one_hot(test_obj_id, depth=self.num_obj, device=self.device, axis=1)
-        # (n_p, n_o)
-        prob_P_rmd = torch.mul(
-            torch.matmul(prob_A_rmd, torch.transpose(test_a_onehot, 0, 1)),
-            torch.matmul(prob_O, torch.transpose(test_o_onehot, 0, 1))
+        losses["loss_total"] = (
+            self.args.lambda_cls_attr * losses["loss_cls_attr/total"] +
+            self.args.lambda_cls_obj * losses["loss_cls_obj/total"] +
+            self.args.lambda_sym * losses["loss_sym/total"] +
+            self.args.lambda_axiom * losses["loss_axiom/total"] + 
+            self.args.lambda_trip * losses["loss_trip/total"]
         )
 
-        score_res = dict([
-            ("score_rmd", [prob_P_rmd, prob_A_attr, prob_O]),
-        ])
-
-        for key in score_res.keys():
-            score_res[key][0] = {
-                (a, o): score_res[key][0][:, i]
-                for i, (a, o) in enumerate(zip(test_att, test_obj))
-            }
-
-        return score_res
-
-    def distance_metric(self, a, b):
-        if self.args.distance_metric == 'L2':
-            return torch.norm(a - b, dim=-1)
-        elif self.args.distance_metric == 'L1':
-            return torch.norm(a - b, dim=-1, p=1)
-        elif self.args.distance_metric == 'cos':
-            return torch.sum(
-                F.normalize(a, p=2, dim=-1) *
-                F.normalize(b, p=2, dim=-1)
-                , dim=-1)
+        
+        if self.args.obj_pred is not None:
+            prob_obj = torch.from_numpy(batch["obj_pred"]]).cuda()
         else:
-            raise NotImplementedError("Unsupported distance metric: %s" + \
-                                      self.args.distance_metric)
+            prob_obj = prob_pos_O
 
-    def MSELoss(self, a, b):
-        return torch.mean(self.distance_metric(a, b))
+        return prob_attr, prob_obj, losses
 
-        # def L2distance(self, a, b):
-        #    return self.distance_metric(a, b)
 
-    def triplet_margin_loss(self, anchor, positive, negative):
-        dist = self.distance_metric(anchor, positive) \
-               - self.distance_metric(anchor, negative) + self.args.triplet_margin
-        return torch.max(dist, torch.zeros(dist.shape).to(self.device))
 
-    def RMD_prob(self, feat_plus, feat_minus, repeat_img_feat, is_training, metric):
+
+    def RMD_prob(self, feat_plus, feat_minus, repeat_img_feat, rmd_metric):
         """return attribute classification probability with our RMD"""
         # feat_plus, feat_minus:  shape=(bz, #attr, dim_emb)
         # d_plus: distance between feature before&after CoN
         # d_minus: distance between feature before&after DecoN
 
-        d_plus = self.distance_metric(feat_plus, repeat_img_feat)
-        d_minus = self.distance_metric(feat_minus, repeat_img_feat)
+        d_plus = self.dist_func(feat_plus, repeat_img_feat)
+        d_minus = self.dist_func(feat_minus, repeat_img_feat)
         d_plus = torch.reshape(d_plus, [-1, self.num_attr])  # bz, #attr
         d_minus = torch.reshape(d_minus, [-1, self.num_attr])  # bz, #attr
 
-        if metric == 'softmax':
+        if rmd_metric == 'softmax':
             p_plus = F.softmax(-d_plus, 1)  # (bz, #attr), smaller = better
             p_minus = F.softmax(d_minus, 1)  # (bz, #attr), larger = better
             return p_plus, p_minus
 
-        elif metric == 'rmd':
-            d_plus_comp = torch.from_numpy(self.dset.comp_gamma['b']).to(self.device) * d_plus
-            d_minus_comp = torch.from_numpy(self.dset.comp_gamma['a']).to(self.device) * d_minus
-            d_plus_attr = torch.from_numpy(self.dset.attr_gamma['b']).to(self.device) * d_plus
-            d_minus_attr = torch.from_numpy(self.dset.attr_gamma['a']).to(self.device) * d_minus
+        elif rmd_metric == 'rmd':
+            # d_plus_comp = torch.from_numpy(self.dset.comp_gamma['b']).to(self.device) * d_plus
+            # d_minus_comp = torch.from_numpy(self.dset.comp_gamma['a']).to(self.device) * d_minus
+            # d_plus_attr = torch.from_numpy(self.dset.attr_gamma['b']).to(self.device) * d_plus
+            # d_minus_attr = torch.from_numpy(self.dset.attr_gamma['a']).to(self.device) * d_minus
+            d_plus_comp = d_plus
+            d_minus_comp = d_minus
+            d_plus_attr = d_plus
+            d_minus_attr = d_minus
 
             p_comp = F.softmax(d_minus_comp - d_plus_comp, dim=1)
             p_attr = F.softmax(d_minus_attr - d_plus_attr, dim=1)

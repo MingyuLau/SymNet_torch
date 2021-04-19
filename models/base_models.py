@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as fc_cls
+import torch.nn.functional as F
 import numpy as np
 import logging
 
@@ -63,3 +63,17 @@ class TripletMarginLoss(Distance):
         neg_dist = self.metric_func(anchor, negative)
         dist_diff = pos_dist - neg_dist + self.triplet_margin
         return torch.maximum(dist_diff, 0)
+
+
+class BCELossWithLabel(nn.Module):
+    def __init__(self, depth, weight=None):
+        super(BCELossWithLabel, self).__init__()
+        self.bceloss = nn.BCELoss(weight)
+        self.depth = depth
+
+
+    def forward(self, probs, labels, reverse=False):
+        targets = F.one_hot(labels, self.depth).float()
+        if reverse: # if True, reverse the probs
+            probs = 1-probs
+        return self.bceloss(probs, targets)

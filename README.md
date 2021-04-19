@@ -23,3 +23,4 @@ See `requirementes.txt`. Python 3.7 + PyTorch 1.8.1
 7. lr scheduler还没实现。如果要加的话还要存进statedict
 8. GRADIENT_CLIPPING还没实现
 9. focal loss not implemented
+10. loss的log精简一下，tb不要显示那么多（参考tf版本

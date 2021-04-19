@@ -67,7 +67,6 @@ class Embedder:
 
     def __init__(self, vec_type, vocab, data):
         self.vec_type = vec_type
-        self.device = device
 
         if vec_type != 'onehot':
             self.embeds = self.load_word_embeddings(vec_type, vocab, data)
@@ -78,11 +77,13 @@ class Embedder:
     def get_embedding(self, i):
         """actually implements __getitem__() function"""
         if self.vec_type == 'onehot':
-            return one_hot(i, depth=self.emb_dim, axis=1).to(self.device)
+            return torch.nn.functional.one_hot(i, self.emb_dim, axis=1).cuda()
         else:
-            i_onehot = one_hot(i, depth=self.embeds.shape[0], axis=1)
-            return torch.matmul(i_onehot.to(self.device),
-                                torch.from_numpy(self.embeds).to(self.device))
+            # i_onehot = torch.nn.functional.one_hot(i, depth=self.embeds.shape[0], axis=1)
+            # return torch.matmul(i_onehot.cuda(),
+            #                     torch.from_numpy(self.embeds).cuda())
+            
+            return torch.from_numpy(self.embeds).cuda()[i, :]
 
     def load_word_embeddings(self, vec_type, vocab, data):
         tmp = aux_data.load_wordvec_dict(data, vec_type)
@@ -110,41 +111,13 @@ class Embedder:
 #                                network utils                                 #
 ################################################################################
 
-# def one_hot(tensor, depth, axis):
-#     assert len(tensor.shape) == 1
-#     assert axis == 1
-#     size = tensor.shape[0]
-#     ans = torch.zeros(size, depth)
-#     ans[torch.arange(size), tensor] = 1
-#     return ans
+def repeat_on(tensor, repeats, dim):
+    return tensor.repeat_interleave(repeats, dim)
 
-
-# def repeat_tensor(tensor, axis, multiple):
-#     raise NotImplementedError("you can use torch.repeat()")
-#     """e.g. (1,2,3)x3 = (1,1,1,2,2,2,3,3,3)"""
-    
-#     result_shape = list(tensor.shape)
-#     for i, v in enumerate(result_shape):
-#         if v is None:
-#             result_shape[i] = tensor.shape[i]
-#     result_shape[axis] *= multiple
-
-#     tensor = torch.unsqueeze(tensor, axis+1)
-#     mul = [1] * len(tensor.shape)
-#     mul[axis+1] = multiple
-#     tensor = tensor.repeat(mul)
-#     tensor = torch.reshape(tensor, result_shape)
-
-#     return tensor
-
-
-# def tile_tensor(tensor, axis, multiple):
-#     """e.g. (1,2,3)x3 = (1,2,3,1,2,3,1,2,3)"""
-#     raise NotImplementedError("you can use torch.tile()")
-#     mul = [1] * len(tensor.shape)
-#     mul[axis] = multiple
-
-#     return tensor.repeat(mul)
+def tile_on(tensor, repeats, dim):
+    repvec = [1]*len(tensor.size())
+    repvec[dim] = repeats
+    return tensor.tile(tuple(repvec))
 
 
 def activation_func(name):

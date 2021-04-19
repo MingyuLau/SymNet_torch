@@ -24,7 +24,7 @@ from pprint import pprint
 from datetime import datetime
 from collections import defaultdict
 
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 
 
 from utils import config as cfg
@@ -265,7 +265,7 @@ def train_epoch(model, optimizer, dataloader, writer, epoch, max_epoch):
         _, _, losses = model(batch)
 
         optimizer.zero_grad()
-        losses["total"].backward()
+        losses["loss_total"].backward()
         optimizer.step()
 
         for key, value in losses.items():
@@ -273,7 +273,7 @@ def train_epoch(model, optimizer, dataloader, writer, epoch, max_epoch):
     
 
     for key, value in total_loss.items():
-        writer.add_scalar("loss/"+key, np.mean(value), float(epoch))
+        writer.add_scalar("loss/"+key, np.mean(value), epoch)
 
 
 
@@ -322,7 +322,7 @@ def test_epoch(model, evaluator, dataloader, writer, epoch):
     # save to tensorboard
     for key, value in report_dict.items():
         if key not in ['name', 'epoch']:
-            writer.add_scalar(key, value, float(epoch))
+            writer.add_scalar(key, value, epoch)
 
     return report_dict
 
