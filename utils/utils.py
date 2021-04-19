@@ -176,6 +176,35 @@ def get_optimizer(optim_type, lr, params):
     else:
         raise NotImplementedError("{} optimizer is not implemented".format(optim_type))
 
+
+def set_scheduler(args, optimizer, train_dataloader):
+    """ return a learning rate scheduler """
+    decay_stepsize = len(train_dataloader) * args.lr_decay_step
+
+    if args.lr_decay_type == 'no':
+        scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=(lambda epoch: 1.0))
+    elif args.lr_decay_type == 'exp':
+        scheduler = lr_scheduler.StepLR(optimizer, step_size=decay_stepsize, gamma=args.lr_decay_rate)
+    elif args.lr_decay_type == 'cos':
+        scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=decay_stepsize, T_mult=2, eta_min=0)
+        # TODO: this is NOT equivalent to the tf version
+
+    # elif opt.lr_policy == 'linear':
+    #     def lambda_rule(epoch):
+    #         lr_l = 1.0 - max(0, epoch + opt.epoch_count - opt.niter) / float(opt.niter_decay + 1)
+    #         return lr_l
+    #     scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_rule)
+    # elif opt.lr_policy == 'step':
+    #     scheduler = lr_scheduler.StepLR(optimizer, step_size=opt.lr_decay_iters, gamma=0.1)
+    # elif opt.lr_policy == 'plateau':
+    #     scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.2, threshold=0.01, patience=5)
+    # elif opt.lr_policy == 'cosine':
+    #     scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_max=opt.niter, eta_min=0)
+
+    else:
+        return NotImplementedError('learning rate policy [%s] is not implemented', args.lr_decay_type)
+    return scheduler
+
     
 def clear_folder(dirname):
     """clear weight and log dir"""
@@ -205,3 +234,16 @@ class CheckpointPath(object):
     def in_dir(ckpt_path: str, log_dir: str) -> bool:
         ckpt_log_dir, _ = decompose(ckpt_path)
         return osp.samefile(ckpt_log_dir, log_dir)
+
+
+def snapshot(model, log_dir, epoch):
+    """save checkpoint"""
+    ckpt_path = CheckpointPath.compose(log_dir, epoch)
+    
+    torch.save({
+        "epoch": epoch,
+        "state_dict": model.state_dict(),
+        "optimizer": optimizer,
+    }, ckpt_path)
+
+    logging.getLogger('utils.snapshot').info('Wrote snapshot to: {}'.format(ckpt_path))

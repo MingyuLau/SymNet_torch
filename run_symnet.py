@@ -209,7 +209,8 @@ def main():
     else:
         # load weight
         checkpoint = torch.load(args.trained_weight)
-        model.load_state_dict(checkpoint['params'])
+        model.load_state_dict(checkpoint['state_dict'])
+        optimizer = checkpoint['optimizer']
 
         logger.info("Checkpoint <= "+args.trained_weight)
         
@@ -238,17 +239,16 @@ def main():
             with torch.no_grad():
                 current_report = test_epoch(model, test_dataloader, epoch)
 
-
-                if best_report is None or current_report[main_score_key]>best_report[main_score_key]:
-                    best_report = current_report
-                
-                # print test results
-                print("Current: " + utils.formated_czsl_result(current_report))
-                print("Best: " + utils.formated_czsl_result(best_report))
-
+            if best_report is None or current_report[main_score_key]>best_report[main_score_key]:
+                best_report = current_report
             
-        if args.snapshot_freq>0 and epoch%args.snapshot_freq == 0:
-            utils.snapshot(model, epoch)
+            # print test results
+            print("Current: " + utils.formated_czsl_result(current_report))
+            print("Best: " + utils.formated_czsl_result(best_report))
+
+        
+    if args.snapshot_freq>0 and epoch%args.snapshot_freq == 0:
+        utils.snapshot(model, epoch)
 
 
     writer.close()
