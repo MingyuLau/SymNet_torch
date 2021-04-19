@@ -192,7 +192,7 @@ class CompositionDatasetActivations(torch.utils.data.Dataset):
             negid = self.sample_negative(pos[1], pos[2]) # negative example
             neg = get_sample(negid)
             data.update({
-                "pos_attr_id": neg["attr_id"],
+                "neg_attr_id": neg["attr_id"],
             })
 
         if self.obj_pred is not None:
