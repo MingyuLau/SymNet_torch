@@ -9,3 +9,4 @@ See `requirementes.txt`. Python 3.7 + PyTorch 1.8.1
 # changes
 
 1. logs和weights合并到了logs
+2. GCZSL evaluator还没有改过，可能会有问题
