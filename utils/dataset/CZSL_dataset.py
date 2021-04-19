@@ -41,15 +41,14 @@ class CompositionDatasetActivations(torch.utils.data.Dataset):
         self.attrs, self.objs, self.pairs, self.train_pairs, self.test_pairs = self.parse_split()
         assert len(set(self.train_pairs)&set(self.test_pairs))==0, 'train and test are not mutually exclusive'
 
-        self.train_data, self.test_data = self.get_split_info()
-        self.data = self.train_data if self.phase=='train' else self.test_data   # list of [img_name, attr, obj, attr_id, obj_id, feat]
-        print ('#images = %d'%len(self.data))
-
-
         self.attr2idx = {attr: idx for idx, attr in enumerate(self.attrs)}
         self.obj2idx = {obj: idx for idx, obj in enumerate(self.objs)}
         self.pair2idx = {pair: idx for idx, pair in enumerate(self.pairs)}
 
+
+        self.train_data, self.test_data = self.get_split_info()
+        self.data = self.train_data if self.phase=='train' else self.test_data   # list of [img_name, attr, obj, attr_id, obj_id, feat]
+        print ('# images: %d'%len(self.data))
         print ('# train pairs: %d | # test pairs: %d'%(len(self.train_pairs), len(self.test_pairs)))
 
         # return {object: all attrs that occur with obj}
@@ -179,7 +178,7 @@ class CompositionDatasetActivations(torch.utils.data.Dataset):
 
         pos = get_sample(index)
 
-        mask = np.array(self.obj_affordance_mask[pos[2]], dtype=np.float32)
+        mask = np.array(self.obj_affordance_mask[pos["obj_id"]], dtype=np.float32)
 
         data = {
             "pos_attr_id":      pos["attr_id"],

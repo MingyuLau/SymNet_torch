@@ -181,9 +181,9 @@ def main():
     
 
     logger.info("Loading network")
-    network_module = importlib.import_module('network.'+args.network)
-    network = network_module.Model(train_dataloader.dataset, args).cuda()
-    print(network)
+    network_module = importlib.import_module('models.'+args.network)
+    model = network_module.Model(train_dataloader.dataset, args).cuda()
+    print(model)
 
     
 
@@ -218,7 +218,7 @@ def main():
 
 
     # evaluator
-    evaluator = CZSL_Evaluator(test_dataloader.dataset, network)
+    evaluator = CZSL_Evaluator(test_dataloader.dataset, model)
     if args.network == 'fc_obj':
         main_score_key = 'real_obj_acc'
     else:
@@ -229,11 +229,11 @@ def main():
     # trainval
     logger.info('Start training')
     for epoch in range(init_epoch+1, args.epoch+1):
-        train_epoch(model, optimizer, dataloader, epoch, max_epoch)
+        train_epoch(model, optimizer, train_dataloader, writer, epoch, args.epoch)
 
         if args.test_freq>0 and epoch%args.test_freq == 0:
             with torch.no_grad():
-                current_report = test_epoch(model, test_dataloader, epoch)
+                current_report = test_epoch(model, evaluator, test_dataloader, writer, epoch)
 
             if best_report is None or current_report[main_score_key]>best_report[main_score_key]:
                 best_report = current_report
@@ -243,8 +243,8 @@ def main():
             print("Best: " + utils.formated_czsl_result(best_report))
 
         
-    if args.snapshot_freq>0 and epoch%args.snapshot_freq == 0:
-        utils.snapshot(model, epoch)
+        if args.snapshot_freq>0 and epoch%args.snapshot_freq == 0:
+            utils.snapshot(model, log_dir, optimizer, epoch)
 
 
     writer.close()
@@ -254,7 +254,7 @@ def main():
 
 ##########################################################################
 
-def train_epoch(model, optimizer, dataloader, epoch, max_epoch):
+def train_epoch(model, optimizer, dataloader, writer, epoch, max_epoch):
     model.train()
 
     total_loss = defaultdict(list)
@@ -262,14 +262,14 @@ def train_epoch(model, optimizer, dataloader, epoch, max_epoch):
     for batch_ind, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader), postfix='Train %d/%d'%(epoch, max_epoch)):
         batch = {k:v.cuda() for k,v in batch.items()}
         
-        _, _, _, losses = model(batch)
+        _, _, losses = model(batch)
 
         optimizer.zero_grad()
         losses["total"].backward()
         optimizer.step()
 
         for key, value in losses.items():
-            total_loss[key].append(value.item().cpu())
+            total_loss[key].append(value.item())
     
 
     for key, value in total_loss.items():
@@ -277,7 +277,7 @@ def train_epoch(model, optimizer, dataloader, epoch, max_epoch):
 
 
 
-def test_epoch(model, dataloader, epoch):
+def test_epoch(model, evaluator, dataloader, writer, epoch):
     accuracies_pair = []
     accuracies_attr = []
     accuracies_obj = []
@@ -285,11 +285,9 @@ def test_epoch(model, dataloader, epoch):
     for _, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader), postfix='Test %d'%epoch):
         batch = {k:v.cuda() for k,v in batch.items()}
 
-        preds = model(batch["image_feature"])
+        pred_attr, pred_obj, _ = model(batch)
 
-        attr_truth, obj_truth = batch["attr_id"], batch["obj_id"]
-
-        pred_attr, pred_obj = preds
+        attr_truth, obj_truth = batch["pos_attr_id"], batch["pos_obj_id"]
         pred_pair = utils.generate_pair_result(pred_attr, pred_obj, dataloader.dataset)
         pair_results = evaluator.score_model(pred_pair, obj_truth)
         match_stats = evaluator.evaluate_predictions(

@@ -1,9 +1,9 @@
 import time
 import cv2
-import parse
 import re
 import os
-import argparse
+import logging
+# import argparse
 import os.path as osp
 from PIL import Image
 import numpy as np
@@ -46,12 +46,12 @@ def display_args(args, logger, verbose=False):
 def duplication_check(args, log_dir):
     if args.force:
         return
-    elif args.trained_weight is None or not utils.CheckpointPath.in_dir(args.trained_weight, log_dir)
-        assert not osp.exists(log_dir, "log dir with same name exists (%s)"%log_dir)
+    elif args.trained_weight is None or not utils.CheckpointPath.in_dir(args.trained_weight, log_dir):
+        assert not osp.exists(log_dir), "log dir with same name exists (%s)"%log_dir
         
 
 def formated_czsl_result(report):
-    fstr = '[{name}/{epoch}] rA:{real_attr_acc:.4f}|rO:{real_obj_acc:.4f}|Cl/T1:{top1_acc:.4f}|T2:{top2_acc:.4f}|T3:{top3_acc:.4f}'
+    fstr = '[E{epoch}] rA:{real_attr_acc:.4f}|rO:{real_obj_acc:.4f}|Cl/T1:{top1_acc:.4f}|T2:{top2_acc:.4f}|T3:{top3_acc:.4f}'
 
     return fstr.format(**report)
 
@@ -208,7 +208,7 @@ def set_scheduler(args, optimizer, train_dataloader):
     
 def clear_folder(dirname):
     """clear weight and log dir"""
-    logger = self.logger('clear_folder')
+    logger = logging.getLogger('utils.clear_folder')
 
     for f in os.listdir(dirname):
         logger.warning('Deleted log file ' + f)
@@ -220,23 +220,23 @@ class CheckpointPath(object):
     TEMPLATE = "{:s}/checkpoint_ep{:d}.pt"
     EPOCH_PATTERN = "checkpoint_ep([0-9]*).pt"
 
-    @classmethod
+    
     def compose(log_dir: str, epoch: int) -> str:
-        return TEMPLATE.format(log_dir, epoch)
+        return CheckpointPath.TEMPLATE.format(log_dir, epoch)
 
-    @classmethod
+    
     def decompose(ckpt_path: str) -> (str, int):
         log_dir = osp.dirname(ckpt_path)
-        epoch = re.match(EPOCH_PATTERN, osp.basename(ckpt_path)).group(0)
+        epoch = re.match(CheckpointPath.EPOCH_PATTERN, osp.basename(ckpt_path)).group(0)
         return log_dir, int(epoch)
     
-    @classmethod
+    
     def in_dir(ckpt_path: str, log_dir: str) -> bool:
         ckpt_log_dir, _ = decompose(ckpt_path)
         return osp.samefile(ckpt_log_dir, log_dir)
 
 
-def snapshot(model, log_dir, epoch):
+def snapshot(model, log_dir, optimizer, epoch):
     """save checkpoint"""
     ckpt_path = CheckpointPath.compose(log_dir, epoch)
     
@@ -251,8 +251,8 @@ def snapshot(model, log_dir, epoch):
 
 def generate_pair_result(pred_attr, pred_obj, dset):
     scores = {}
-    for i, (attr, obj) in enumerate(self.dset.pairs):
+    for i, (attr, obj) in enumerate(dset.pairs):
         attr = dset.attr2idx[attr]
         obj  = dset.obj2idx[obj]
-        scores[(attr, obj)] = pred_attr[attr]*pred_obj[obj]
-    return score
+        scores[(attr, obj)] = pred_attr[:, attr]*pred_obj[:, obj]
+    return scores

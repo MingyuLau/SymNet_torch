@@ -17,8 +17,8 @@ class CZSL_Evaluator:
         self.dset = dset 
 
         # convert text pairs to idx tensors: [('sliced', 'apple'), ('ripe', 'apple'), ...] --> torch.LongTensor([[0,1],[1,1], ...])
-        pairs = [(dset.attr2idx[attr], dset.obj2idx[obj]) for attr, obj in dset.pairs]
-        self.pairs = torch.LongTensor(pairs)
+        self.pairs_list = [(dset.attr2idx[attr], dset.obj2idx[obj]) for attr, obj in dset.pairs]
+        self.pairs = torch.LongTensor(self.pairs_list)
 
         # mask over pairs that occur in closed world 
         test_pair_set = set(dset.test_pairs)
@@ -32,12 +32,6 @@ class CZSL_Evaluator:
             oracle_obj_mask.append(torch.ByteTensor(mask))
         self.oracle_obj_mask = torch.stack(oracle_obj_mask, 0)
 
-        # decide if the model being evaluated is a manifold model or not
-        mname = model.__class__.__name__
-        if 'VisualProduct' in mname:
-            self.score_model = self.score_clf_model
-        else:
-            self.score_model = self.score_manifold_model
 
 
     # generate masks for each setting, mask scores, and get prediction labels    
@@ -94,7 +88,7 @@ class CZSL_Evaluator:
         obj_truth = obj_truth.cpu()
 
         # gather scores for all relevant (a,o) pairs
-        scores = torch.stack([scores[(attr, obj)] for attr, obj in self.dset.pairs], 1) # (B, #pairs)
+        scores = torch.stack([scores[pair] for pair in self.pairs_list], 1) # (B, #pairs)
         results = self.generate_predictions(scores, obj_truth)
         return results
 
@@ -122,7 +116,7 @@ class CZSL_Evaluator:
 
         obj_oracle_match = (attr_truth==predictions['object_oracle'][0]).float() * (obj_truth==predictions['object_oracle'][1]).float()
 
-        return attr_match, obj_match, closed_match, open_match, obj_oracle_match
+        return attr_match, obj_match, closed_1_match, closed_2_match, closed_3_match, open_match, obj_oracle_match
 
     def evaluate_only_attr_obj(self, prob_a, gt_a, prob_o, gt_o):
         prob_a, prob_o = prob_a, prob_o

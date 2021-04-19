@@ -215,7 +215,8 @@ class CompositionDatasetActivationsGenerator(CompositionDatasetActivations):
         with torch.no_grad():
             self.generate_features(feat_file, feat_extractor)
         print('Features generated.')
-        def get_split_info(self):
+    
+    def get_split_info(self):
         data = torch.load(self.root+'/metadata.t7')
         train_pair_set = set(self.train_pairs)
         test_pair_set = set(self.test_pairs)
