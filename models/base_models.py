@@ -48,7 +48,7 @@ class Distance(nn.Module):
 class DistanceLoss(Distance):
     def forward(self, x, y):
         output = self.metric_func(x, y)
-        output = torch.mean(metric)
+        output = torch.mean(output)
         return output
 
 
@@ -62,18 +62,17 @@ class TripletMarginLoss(Distance):
         pos_dist = self.metric_func(anchor, positive)
         neg_dist = self.metric_func(anchor, negative)
         dist_diff = pos_dist - neg_dist + self.triplet_margin
-        return torch.maximum(dist_diff, 0)
+        output = torch.max(dist_diff, torch.zeros_like(dist_diff).to(dist_diff.device))
+        return output.mean()
 
 
-class BCELossWithLabel(nn.Module):
-    def __init__(self, depth, weight=None):
-        super(BCELossWithLabel, self).__init__()
-        self.bceloss = nn.BCELoss(weight)
-        self.depth = depth
+class CrossEntropyLossWithProb(nn.Module):
+    def __init__(self, weight=None, clip_thres=1e-4):
+        super(CrossEntropyLossWithProb, self).__init__()
+        self.nll = nn.NLLLoss(weight)
+        self.clip_thres = clip_thres
 
-
-    def forward(self, probs, labels, reverse=False):
-        targets = F.one_hot(labels, self.depth).float()
-        if reverse: # if True, reverse the probs
-            probs = 1-probs
-        return self.bceloss(probs, targets)
+    def forward(self, probs, labels):
+        probs = probs.clamp_min(self.clip_thres)
+        ll = probs.log()
+        return self.nll(ll, labels)

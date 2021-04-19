@@ -5,7 +5,7 @@ import numpy as np
 import logging
 
 from utils import utils, aux_data
-from .base_models import MLP, BCELossWithLabel
+from .base_models import MLP
 
 
 
@@ -24,18 +24,21 @@ class Model(nn.Module):
         if args.loss_class_weight:
             _, obj_loss_wgt = aux_data.load_loss_weight(args.data)
             obj_loss_wgt = torch.tensor(obj_loss_wgt,  dtype=torch.float32).cuda()
-            self.obj_bce = BCELossWithLabel(self.num_obj, weight=obj_loss_wgt)
+            self.obj_ce = nn.CrossEntropyLoss(weight=obj_loss_wgt)
         else:
-            self.obj_bce = BCELossWithLabel(self.num_obj)
+            self.obj_ce = nn.CrossEntropyLoss()
 
 
 
 
-    def forward(self, batch):
+    def forward(self, batch, require_loss=True):
         score_obj = self.obj_cls_mlp_layer(batch["pos_feature"])
         prob_obj = F.softmax(score_obj, dim=-1)
-        loss = self.obj_bce(prob_obj, batch["pos_obj_id"])
+        loss = self.obj_ce(score_obj, batch["pos_obj_id"])
 
         foo_prob_attr = torch.zeros([prob_obj.size(0), self.num_attr]).cuda()
         
-        return foo_prob_attr, prob_obj, {"loss_total": loss}
+        if require_loss:
+            return foo_prob_attr, prob_obj, {"loss_total": loss}
+        else:
+            return foo_prob_attr, prob_obj

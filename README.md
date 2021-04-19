@@ -6,7 +6,7 @@ SymNet_torch development repo
 See `requirementes.txt`. Python 3.7 + PyTorch 1.8.1
 
 
-# changes/TODOs
+# changes
 
 1. logs和weights合并到了logs
 5. args.weight_type 改成了可读的str类型
@@ -24,3 +24,5 @@ See `requirementes.txt`. Python 3.7 + PyTorch 1.8.1
 8. GRADIENT_CLIPPING还没实现
 9. focal loss not implemented
 10. loss的log精简一下，tb不要显示那么多（参考tf版本
+11. reshape->view
+12. symnet的compute_loss参数prob_RMD_plus, prob_RMD_minus太明显了 藏起来

@@ -77,13 +77,13 @@ class Embedder:
     def get_embedding(self, i):
         """actually implements __getitem__() function"""
         if self.vec_type == 'onehot':
-            return torch.nn.functional.one_hot(i, self.emb_dim, axis=1).cuda()
+            return torch.nn.functional.one_hot(i, self.emb_dim).float().cuda()
         else:
             # i_onehot = torch.nn.functional.one_hot(i, depth=self.embeds.shape[0], axis=1)
             # return torch.matmul(i_onehot.cuda(),
             #                     torch.from_numpy(self.embeds).cuda())
             
-            return torch.from_numpy(self.embeds).cuda()[i, :]
+            return torch.from_numpy(self.embeds).float().cuda()[i, :]
 
     def load_word_embeddings(self, vec_type, vocab, data):
         tmp = aux_data.load_wordvec_dict(data, vec_type)
@@ -117,7 +117,9 @@ def repeat_on(tensor, repeats, dim):
 def tile_on(tensor, repeats, dim):
     repvec = [1]*len(tensor.size())
     repvec[dim] = repeats
-    return tensor.tile(tuple(repvec))
+    return tensor.repeat(*repvec)
+    # torch>=1.8
+    # return torch.tile(tensor, tuple(repvec))
 
 
 def activation_func(name):
@@ -132,7 +134,7 @@ def activation_func(name):
 
 
 def get_optimizer(optim_type, lr, params):
-    if optim_type == 'sgd':
+    if optim_type != 'sgd':
         logger = logging.getLogger('utils.get_optimizer')
         logger.info('Using {} optimizer'.format(optim_type))
 

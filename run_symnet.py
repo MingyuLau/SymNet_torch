@@ -285,7 +285,7 @@ def test_epoch(model, evaluator, dataloader, writer, epoch):
     for _, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader), postfix='Test %d'%epoch):
         batch = {k:v.cuda() for k,v in batch.items()}
 
-        pred_attr, pred_obj, _ = model(batch)
+        pred_attr, pred_obj = model(batch, require_loss=False)
 
         attr_truth, obj_truth = batch["pos_attr_id"], batch["pos_obj_id"]
         pred_pair = utils.generate_pair_result(pred_attr, pred_obj, dataloader.dataset)

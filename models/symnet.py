@@ -13,11 +13,11 @@ class Transformer(nn.Module):
         self.name = name
 
         if not args.no_attention:
-            self.fc_attention = MLP(attr_emb_dim, args.rep_dim, hidden_layers=self.args.fc_att, batchnorm=args.batchnorm)
+            self.fc_attention = MLP(attr_emb_dim, args.rep_dim, hidden_layers=args.fc_att, batchnorm=args.batchnorm)
         else:
             self.fc_attention = None
 
-        self.fc_out = MLP(args.rep_dim + attr_emb_dim, args.rep_dim, args, hidden_layers=self.args.fc_compress, batchnorm=args.batchnorm)
+        self.fc_out = MLP(args.rep_dim + attr_emb_dim, args.rep_dim, hidden_layers=args.fc_compress, batchnorm=args.batchnorm)
 
     def forward(self, rep, v_attr):
         if self.fc_attention:
@@ -39,12 +39,12 @@ class MLPClassifier(nn.Module):
     def __init__(self, num_class, args, name):
         super(MLPClassifier, self).__init__()
         self.name = name
-        self.mlp = MLP(args.rep_dim, num_class, args, hidden_layers=args.fc_cls, batchnorm=args.batchnorm)
+        self.mlp = MLP(args.rep_dim, num_class, hidden_layers=args.fc_cls, batchnorm=args.batchnorm)
 
     def forward(self, emb):
         score = self.mlp(emb)
-        prob = F.softmax(score, 1)
-        return score_A, prob_A
+        prob = F.softmax(score, -1)
+        return score, prob
 
     def string(self):
         return self.name
@@ -67,54 +67,38 @@ class Model(nn.Module):
         self.CoN = Transformer(self.emb_dim, args, 'CoN')
         self.DeCoN = Transformer(self.emb_dim, args, 'DeCoN')
 
-        self.attr_cls = Classifier(self.num_attr, args, "attr_cls")
-        self.obj_cls = Classifier(self.num_obj, args, "obj_cls")
+        self.attr_cls = MLPClassifier(self.num_attr, args, "attr_cls")
+        self.obj_cls = MLPClassifier(self.num_obj, args, "obj_cls")
 
         if args.loss_class_weight:
             attr_loss_wgt, obj_loss_wgt = aux_data.load_loss_weight(args.data)
             attr_loss_wgt= torch.tensor(attr_loss_wgt, dtype=torch.float32).cuda()
             obj_loss_wgt= torch.tensor(obj_loss_wgt, dtype=torch.float32).cuda()
-            self.attr_bce = BCELossWithLabel(self.num_attr, weight=attr_loss_wgt)
-            self.obj_bce = BCELossWithLabel(self.num_obj, weight=obj_loss_wgt)
+            self.attr_ce = nn.CrossEntropyLoss(weight=attr_loss_wgt)
+            self.attr_ce_prob = CrossEntropyLossWithProb(weight=attr_loss_wgt)
+            self.obj_ce = nn.CrossEntropyLoss(weight=obj_loss_wgt)
         else:
-            self.attr_bce = BCELossWithLabel(self.num_attr)
-            self.obj_bce = BCELossWithLabel(self.num_obj)
+            self.attr_ce = nn.CrossEntropyLoss()
+            self.attr_ce_prob = CrossEntropyLossWithProb()
+            self.obj_ce = nn.CrossEntropyLoss()
 
         self.dist_func = Distance(args.distance_metric)
         self.dist_loss = DistanceLoss(args.distance_metric)
         self.triplet_loss = TripletMarginLoss(args.triplet_margin, args.distance_metric)
 
 
-    def forward(self, batch):
-        losses = {}
-
-        pos_attr_id     = batch["pos_attr_id"]
-        pos_obj_id      = batch["pos_obj_id"]
-        pos_image_feat  = batch["pos_image_feat"]
-        neg_attr_id     = batch["neg_attr_id"]
-        neg_image_feat  = batch["neg_image_feat"]
+    def forward(self, batch, require_loss=True):
+        pos_image_feat  = batch["pos_feature"]
         batchsize = pos_image_feat.shape[0]
 
-        pos_attr_emb = self.attr_embedder.get_embedding(pos_attr_id)
-        neg_attr_emb = self.attr_embedder.get_embedding(neg_attr_id)
-
         pos_img = self.rep_embedder(pos_image_feat)  # (bz,dim)
-        neg_img = self.rep_embedder(neg_image_feat)  # (bz,dim)
-
-        # rA = remove positive attribute A
-        # aA = add positive attribute A
-        # rB = remove negative attribute B
-        # aB = add negative attribute B
-        pos_aA = self.CoN(pos_img, pos_attr_emb)
-        pos_aB = self.CoN(pos_img, neg_attr_emb)
-        pos_rA = self.DeCoN(pos_img, pos_attr_emb)
-        pos_rB = self.DeCoN(pos_img, neg_attr_emb)
+        
 
         # obj prediction
-        _, prob_pos_O = self.obj_cls(pos_img)
+        score_pos_obj, prob_pos_obj = self.obj_cls(pos_img)
 
         # attribute prediction (RMD)
-        attr_emb = self.attr_embedder.get_embedding(np.arange(self.num_attr))
+        attr_emb = self.attr_embedder.get_embedding(torch.arange(0, self.num_attr))
         # (#attr, dim_emb), wordvec of all attributes
         tile_attr_emb = utils.tile_on(attr_emb, batchsize, 0)
         # (bz*#attr, dim_emb)
@@ -127,25 +111,61 @@ class Model(nn.Module):
         prob_RMD_plus, prob_RMD_minus = self.RMD_prob(
             feat_plus, feat_minus,
             repeat_img_feat,
-            metric=self.args.rmd_metric)
+            self.args.rmd_metric)
 
         prob_attr = (prob_RMD_plus+prob_RMD_minus)*0.5
+        
+        if "obj_pred" in batch:
+            prob_obj = batch["obj_pred"]
+        else:
+            prob_obj = prob_pos_obj
+
+
+        if require_loss:
+            losses = self.compute_loss(batch, pos_img, score_pos_obj, prob_RMD_plus, prob_RMD_minus)
+            return prob_attr, prob_obj, losses
+        else:
+            return prob_attr, prob_obj
+
+
+    def compute_loss(self, batch, pos_img, score_pos_obj, prob_RMD_plus, prob_RMD_minus):
+        losses = {}
+
+        pos_attr_id     = batch["pos_attr_id"]
+        pos_obj_id      = batch["pos_obj_id"]
+        neg_attr_id     = batch["neg_attr_id"]
+        neg_image_feat  = batch["neg_feature"]
+
+        pos_attr_emb = self.attr_embedder.get_embedding(pos_attr_id)
+        neg_attr_emb = self.attr_embedder.get_embedding(neg_attr_id)
+
+        neg_img = self.rep_embedder(neg_image_feat)  # (bz,dim)
+
+        # rA = remove positive attribute A
+        # aA = add positive attribute A
+        # rB = remove negative attribute B
+        # aB = add negative attribute B
+        pos_aA = self.CoN(pos_img, pos_attr_emb)
+        pos_aB = self.CoN(pos_img, neg_attr_emb)
+        pos_rA = self.DeCoN(pos_img, pos_attr_emb)
+        pos_rB = self.DeCoN(pos_img, neg_attr_emb)
+
 
         ########################## classification losses ######################
         # unnecessary to compute cls loss for neg_img
 
         if self.args.lambda_cls_attr > 0:
             # original image
-            _, prob_pos_A = self.attr_cls(pos_img)
-            losses["loss_cls_attr/pos_a"] = self.attr_bce(prob_pos_A, pos_attr_id)
+            score_pos_A, prob_pos_A = self.attr_cls(pos_img)
+            losses["loss_cls_attr/pos_a"] = self.attr_ce(score_pos_A, pos_attr_id)
 
             # after removing pos_attr
-            _, prob_pos_rA_A = self.attr_cls(pos_rA)
-            losses["loss_cls_attr/pos_rA_a"] = self.attr_bce(prob_pos_rA_A, pos_attr_id, reverse=True)
+            score_pos_rA_A, prob_pos_rA_A = self.attr_cls(pos_rA)
+            losses["loss_cls_attr/pos_rA_a"] = self.attr_ce(-score_pos_rA_A, pos_attr_id) # different implementation from TF version
 
             # rmd
-            losses["loss_cls_attr/rmd_plus"] = self.attr_bce(prob_RMD_plus, pos_attr_id)
-            losses["loss_cls_attr/rmd_minus"] = self.attr_bce(prob_RMD_minus, pos_attr_id)
+            losses["loss_cls_attr/rmd_plus"] = self.attr_ce_prob(prob_RMD_plus, pos_attr_id)
+            losses["loss_cls_attr/rmd_minus"] = self.attr_ce_prob(prob_RMD_minus, pos_attr_id)
 
             # summary
             losses["loss_cls_attr/total"] = sum([
@@ -160,15 +180,15 @@ class Model(nn.Module):
 
         if self.args.lambda_cls_obj > 0:
             # original image
-            losses["loss_cls_obj/pos_o"] = self.obj_bce(prob_pos_O, pos_obj_id)
+            losses["loss_cls_obj/pos_o"] = self.obj_ce(score_pos_obj, pos_obj_id)
 
             # after removing pos_attr
-            _, prob_pos_rA_O = self.obj_cls(pos_rA)
-            losses["loss_cls_obj/pos_rA_o"] = self.obj_bce(prob_pos_rA_O, pos_obj_id)
+            score_pos_rA_O, prob_pos_rA_O = self.obj_cls(pos_rA)
+            losses["loss_cls_obj/pos_rA_o"] = self.obj_ce(score_pos_rA_O, pos_obj_id)
 
             # after adding neg_attr
-            _, prob_pos_aB_O = self.obj_cls(pos_aB)
-            losses["loss_cls_obj/pos_aB_o"] = self.obj_bce(prob_pos_aB_O, pos_obj_id)
+            score_pos_aB_O, prob_pos_aB_O = self.obj_cls(pos_aB)
+            losses["loss_cls_obj/pos_aB_o"] = self.obj_ce(score_pos_aB_O, pos_obj_id)
 
 
             losses["loss_cls_obj/total"] = sum([
@@ -234,7 +254,6 @@ class Model(nn.Module):
         if self.args.lambda_trip > 0:
             losses["loss_trip/pos"] = self.triplet_loss(pos_img, pos_aA, pos_rA)
             losses["loss_trip/neg"] = self.triplet_loss(pos_img, pos_rB, pos_aB)
-
             losses["loss_trip/total"] = (losses["loss_trip/pos"] + losses["loss_trip/neg"])
 
         else:
@@ -249,13 +268,7 @@ class Model(nn.Module):
             self.args.lambda_trip * losses["loss_trip/total"]
         )
 
-        
-        if self.args.obj_pred is not None:
-            prob_obj = torch.from_numpy(batch["obj_pred"]]).cuda()
-        else:
-            prob_obj = prob_pos_O
-
-        return prob_attr, prob_obj, losses
+        return losses
 
 
 
