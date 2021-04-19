@@ -189,10 +189,11 @@ class CompositionDatasetActivations(torch.utils.data.Dataset):
         }
 
         if self.phase=='train':
-            negid = self.sample_negative(pos[1], pos[2]) # negative example
+            negid = self.sample_negative(pos["attr_id"], pos["obj_id"]) # negative example
             neg = get_sample(negid)
             data.update({
-                "neg_attr_id": neg["attr_id"],
+                "neg_attr_id":  neg["attr_id"],
+                "neg_feature":  neg["feature"],
             })
 
         if self.obj_pred is not None:

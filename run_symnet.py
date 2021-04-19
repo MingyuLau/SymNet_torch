@@ -180,13 +180,10 @@ def main():
         batchsize=args.test_bz, obj_pred=args.obj_pred)
     
 
-    logger.info("Loading network and criterion")
+    logger.info("Loading network")
     network_module = importlib.import_module('network.'+args.network)
-    network = network_module.Network(train_dataloader, args).cuda()
+    network = network_module.Model(train_dataloader.dataset, args).cuda()
     print(network)
-    criterion = network_module.Loss().cuda()
-
-    
 
     
 
@@ -228,12 +225,11 @@ def main():
         main_score_key = 'top1_acc'
     best_report = None
 
-    # TODO: train and test
 
-
+    # trainval
     logger.info('Start training')
     for epoch in range(init_epoch+1, args.epoch+1):
-        train_epoch(model, criterion, optimizer, dataloader, epoch, max_epoch)
+        train_epoch(model, optimizer, dataloader, epoch, max_epoch)
 
         if args.test_freq>0 and epoch%args.test_freq == 0:
             with torch.no_grad():
@@ -258,20 +254,26 @@ def main():
 
 ##########################################################################
 
-def train_epoch(model, criterion, optimizer, dataloader, epoch, max_epoch):
+def train_epoch(model, optimizer, dataloader, epoch, max_epoch):
     model.train()
+
+    total_loss = defaultdict(list)
 
     for batch_ind, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader), postfix='Train %d/%d'%(epoch, max_epoch)):
         batch = {k:v.cuda() for k,v in batch.items()}
         
-        preds = model(batch)
-        loss = criterion(preds, batch)
+        _, _, _, losses = model(batch)
 
         optimizer.zero_grad()
-        loss.backward()
+        losses["total"].backward()
         optimizer.step()
-        
-    #  writer.add_scalar(key, value, float(epoch))
+
+        for key, value in losses.items():
+            total_loss[key].append(value.item().cpu())
+    
+
+    for key, value in total_loss.items():
+        writer.add_scalar("loss/"+key, np.mean(value), float(epoch))
 
 
 
@@ -283,51 +285,46 @@ def test_epoch(model, dataloader, epoch):
     for _, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader), postfix='Test %d'%epoch):
         batch = {k:v.cuda() for k,v in batch.items()}
 
-        preds_dict = model(batch)
+        preds = model(batch["image_feature"])
 
         attr_truth, obj_truth = batch["attr_id"], batch["obj_id"]
 
-        for key, (pred_pair, pred_attr, pred_obj) in preds_dict.items():
-            pair_results = evaluator.score_model(pred_pair, obj_truth)
-            match_stats = evaluator.evaluate_predictions(
-                pair_results, attr_truth, obj_truth)
-            accuracies_pair[key].append(match_stats)
-            # 0/1 sequence of t/f
+        pred_attr, pred_obj = preds
+        pred_pair = utils.generate_pair_result(pred_attr, pred_obj, dataloader.dataset)
+        pair_results = evaluator.score_model(pred_pair, obj_truth)
+        match_stats = evaluator.evaluate_predictions(
+            pair_results, attr_truth, obj_truth)
+        accuracies_pair.append(match_stats)
+        # 0/1 sequence of t/f
 
-            a_match, o_match = evaluator.evaluate_only_attr_obj(
-                pred_attr, attr_truth, pred_obj, obj_truth)
+        a_match, o_match = evaluator.evaluate_only_attr_obj(
+            pred_attr, attr_truth, pred_obj, obj_truth)
 
-            accuracies_attr[key].append(a_match)
-            accuracies_obj[key].append(o_match)
+        accuracies_attr.append(a_match)
+        accuracies_obj.append(o_match)
 
-            
 
-    all_report = {'Current':{}, 'Best':{}}
+    accuracies = accuracies_pair
+    accuracies = zip(*accuracies)
+    accuracies = map(torch.mean, map(torch.cat, accuracies))
+    attr_acc, obj_acc, closed_1_acc, closed_2_acc, closed_3_acc, _, _ = map(lambda x:x.item(), accuracies)
 
-    report_dict = {}
+    real_attr_acc = torch.mean(torch.cat(accuracies_attr)).item()
+    real_obj_acc = torch.mean(torch.cat(accuracies_obj)).item()
 
-    for name in accuracies_pair.keys():
-        accuracies = accuracies_pair[name]
-        accuracies = zip(*accuracies)
-        accuracies = map(torch.mean, map(torch.cat, accuracies))
-        attr_acc, obj_acc, closed_1_acc, closed_2_acc, closed_3_acc, _, _ = map(lambda x:x.item(), accuracies)
+    report_dict = {
+        'real_attr_acc':real_attr_acc,
+        'real_obj_acc': real_obj_acc,
+        'top1_acc':     closed_1_acc,
+        'top2_acc':     closed_2_acc,
+        'top3_acc':     closed_3_acc,
+        'epoch':        epoch,
+    }
 
-        real_attr_acc = torch.mean(torch.cat(accuracies_attr[name])).item()
-        real_obj_acc = torch.mean(torch.cat(accuracies_obj[name])).item()
-
-        report_dict[name] = {
-            'real_attr_acc':real_attr_acc,
-            'real_obj_acc': real_obj_acc,
-            'top1_acc':     closed_1_acc,
-            'top2_acc':     closed_2_acc,
-            'top3_acc':     closed_3_acc,
-            'epoch':        epoch,
-        }
-
-        # save to tensorboard
-        for key, value in report_dict.items():
-            if key not in ['name', 'epoch']:
-                writer.add_scalar(key, value, float(epoch))
+    # save to tensorboard
+    for key, value in report_dict.items():
+        if key not in ['name', 'epoch']:
+            writer.add_scalar(key, value, float(epoch))
 
     return report_dict
 

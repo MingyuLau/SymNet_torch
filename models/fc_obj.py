@@ -1,144 +1,101 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+# import torchvision.models as tmodels
 import numpy as np
-import os, logging, torch
-from collections import OrderedDict
+import logging
 
-from network.base_network import *
-from utils.utils import Embedder
-from utils import config as cfg
+from utils import utils, aux_data
+# from utils import config as cfg
 
 
-class NetWork(BaseNetwork):
-    def __init__(self, dataloader, args, feat_dim, device=torch.device('cpu')):
-        super().__init__(dataloader, args, feat_dim, device)
+class MLP(nn.Module):
+    """Multi-layer perceptron, 1 layers as default. No activation after last fc"""
+    def __init__(self, inp_dim, out_dim, hidden_layers=[], batchnorm=True, bias=True)
+        super(MLP, self).__init__()
+        mod = []
+        last_dim = inp_dim
+        for hid_dim in hidden_layers:
+            mod.append(nn.Linear(last_dim, hid_dim, bias=bias))
+            if batchnorm:
+                mod.append(nn.BatchNorm1d(hid_dim))
+            mod.append(nn.ReLU(inplace=True))
+            last_dim = hid_dim
 
-        self.feat_dim = feat_dim
-        self.obj_cls_mlp_layer = MLP(feat_dim, self.num_obj, self.args, is_training=True, name='obj_cls',
-                                     hidden_layers=self.args.fc_cls)
+        mod.append(nn.Linear(last_dim, out_dim, bias=bias))
 
-    def forward(self, blobs):
-        pos_obj_id = torch.from_numpy(blobs[2]).to(self.device)
-        pos_image_feat = torch.from_numpy(blobs[9]).to(self.device)  # why different from symnet??
+        self.mod = nn.Sequential(*mod)
 
-        ########################## classifier losses ##########################
-        score_pos_O = self.obj_cls_mlp_layer(pos_image_feat)
-        loss = F.cross_entropy(score_pos_O, pos_obj_id, weight=self.obj_weight)
-        # TODO: focal loss not implemented
-
-        # prob_pos_O = F.softmax(score_pos_O, 1)
-        # loss = cross_entropy(prob_pos_O, pos_obj_id,
-        #                      depth=self.num_obj, weight=self.obj_weight, focal_loss=self.args.focal_loss)
-
-        train_summary_op = OrderedDict()
-        train_summary_op['loss'] = loss
-
-        return loss, train_summary_op
-
-    def test_step(self, blobs):
-        dset = self.dataloader.dataset
-        test_att = np.array([dset.attr2idx[attr] for attr, _ in dset.pairs])
-        test_obj = np.array([dset.obj2idx[obj] for _, obj in dset.pairs])
-        pos_image_feat = torch.from_numpy(blobs[4]).to(self.device)
-        if self.args.obj_pred is not None:
-            pos_obj_prediction = torch.from_numpy(blobs[-1]).to(self.device)
-
-        score_pos_O = self.obj_cls_mlp_layer(pos_image_feat)
-        prob_pos_O = F.softmax(score_pos_O, 1)
-
-        batchsize = pos_image_feat.shape[0]
-        prob_pos_A = torch.zeros([batchsize, self.num_attr],
-                                 dtype=pos_image_feat.dtype).to(self.device)
-        score_original = torch.zeros([batchsize, self.num_pair],
-                                     dtype=pos_image_feat.dtype).to(self.device)
-
-        score = OrderedDict([
-            ("score_fc", [score_original, prob_pos_A, prob_pos_O]),
-        ])
-
-        for key in score.keys():
-            score[key][0] = {
-                (a, o): score[key][0][:, i]
-                for i, (a, o) in enumerate(zip(test_att, test_obj))
-            }
-
-        return score
+    def forward(self, x):
+        output = self.mod(x)
+        return output
 
 
-"""
-class Network(BaseNetwork):
-    root_logger = logging.getLogger("network %s"%__file__)
-
-    def __init__(self, dataloader, args, feat_dim=None):
-        super(Network, self).__init__(dataloader, args, feat_dim)
-
-        self.pos_obj_id   = tf.placeholder(tf.int32, shape=[None])
-        self.pos_image_feat = tf.placeholder(tf.float32, shape=[None, self.feat_dim])
-        self.lr = tf.placeholder(tf.float32)
-    
-
-
-
-    def build_network(self, test_only=False):
-        logger = self.logger('create_train_arch')
-
-
-        ########################## classifier losses ##########################
-        score_pos_O = self.MLP(self.pos_image_feat, self.num_obj, 
-            is_training=True, name='obj_cls', 
-            hidden_layers=self.args.fc_cls)
-        prob_pos_O = tf.nn.softmax(score_pos_O, 1)
+class Distance(nn.Module):
+    def __init__(self, metric):
+        super(Distance, self).__init__()
         
-        loss = self.cross_entropy(prob_pos_O, self.pos_obj_id, 
-            depth=self.num_obj, weight=self.obj_weight)
-
-
-        ################################ test #################################
-        
-        score_pos_O = self.MLP(self.pos_image_feat, self.num_obj,
-            is_training=False, name='obj_cls', 
-            hidden_layers=self.args.fc_cls)
-        prob_pos_O = tf.nn.softmax(score_pos_O, 1)
-
-        batchsize = tf.shape(self.pos_image_feat)[0]
-        prob_pos_A = tf.zeros([batchsize, self.num_attr],
-            dtype=self.pos_image_feat.dtype)
-        score_original = tf.zeros([batchsize, self.num_pair],
-            dtype=self.pos_image_feat.dtype)
-
-        score_res = OrderedDict([
-            ("score_fc", [score_original, prob_pos_A, prob_pos_O]),
-        ])
-        
-
-        # summary
-        
-        with tf.device("/cpu:0"):
-            tf.summary.scalar('loss_total', loss)
-            tf.summary.scalar('lr', self.lr)
-            
-        
-        train_summary_op = tf.summary.merge_all()
-
-
-        if test_only:
-            return prob_pos_O
+        if metric == "L2":
+            self.metric_func = lambda x, y: torch.norm(x-y, 2, dim=-1)
+        elif metric == "L1":
+            self.metric_func = lambda x, y: torch.norm(x-y, 1, dim=-1)
+        elif metric == "cos":
+            self.metric_func = lambda x, y: 1-F.cosine_similarity(x, y, dim=-1)
         else:
-            return loss, score_res, train_summary_op
+            raise NotImplementedError("Unsupported distance metric: %s"%metric)
+
+    def forward(self, x, y):
+        output = self.metric_func(x, y)
+        return output
+
+
+class DistanceLoss(Distance):
+    def forward(self, x, y):
+        output = self.metric_func(x, y)
+        output = torch.mean(metric)
+        return output
+
+
+class TripletMarginLoss(Distance):
+    def __init__(self, margin, metric):
+        super(TripletMarginLoss, self).__init__(metric)
+        self.triplet_margin = margin
+
+
+    def forward(self, anchor, positive, negative):
+        pos_dist = self.metric_func(anchor, positive)
+        neg_dist = self.metric_func(anchor, negative)
+        dist_diff = pos_dist - neg_dist + self.triplet_margin
+        return torch.maximum(dist_diff, 0)
 
 
 
-    def train_step(self, sess, blobs, lr, train_op, train_summary_op):
-        summary, _ = sess.run(
-            [train_summary_op, train_op],
-            feed_dict={
-                self.pos_obj_id      : blobs[2],
-                self.pos_image_feat  : blobs[9],
-                self.lr: lr,
-            })
+class Model(nn.Module):
+    def __init__(self, dataset, args):
+        super(Model, self).__init__()
 
-        return summary
+        self.num_attr = dataset.num_attr
+        self.num_pair = dataset.num_pair
+        
+        self.obj_cls_mlp_layer = MLP(
+            dataset.feat_dim, dataset.num_obj, 
+            hidden_layers=args.fc_cls,
+            batchnorm=args.batchnorm)
 
-"""
+        if args.loss_class_weight:
+            _, obj_loss_weight = aux_data.load_loss_weight(args.data)
+            obj_loss_weight = torch.from_numpy(obj_loss_weight).cuda()
+            self.obj_bce = nn.CrossEntropyLoss(weight=obj_loss_weight)
+        else:
+            self.obj_bce = nn.CrossEntropyLoss()
+
+
+
+    def forward(self, batch):
+        score_obj = self.obj_cls_mlp_layer(batch["pos_feature"])
+        prob_obj = F.softmax(score_obj, dim=-1)
+        loss = self.obj_bce(score_obj, batch["pos_obj_id"])
+
+        prob_attr = torch.zeros([prob_obj.size(0), self.num_attr]).cuda()
+
+        return prob_attr, prob_obj, {"total": loss}

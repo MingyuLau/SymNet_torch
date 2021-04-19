@@ -247,3 +247,12 @@ def snapshot(model, log_dir, epoch):
     }, ckpt_path)
 
     logging.getLogger('utils.snapshot').info('Wrote snapshot to: {}'.format(ckpt_path))
+
+
+def generate_pair_result(pred_attr, pred_obj, dset):
+    scores = {}
+    for i, (attr, obj) in enumerate(self.dset.pairs):
+        attr = dset.attr2idx[attr]
+        obj  = dset.obj2idx[obj]
+        scores[(attr, obj)] = pred_attr[attr]*pred_obj[obj]
+    return score

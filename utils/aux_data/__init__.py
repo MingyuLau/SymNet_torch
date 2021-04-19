@@ -12,7 +12,7 @@ def load_loss_weight(dataset_name: str):
         raise NotImplementedError("Loss weight for %s is not implemented yet"%dataset_name)
 
 
-def load_wordvec_dict(dataset_name, vec_type):
+def load_wordvec_dict(dataset_name: str, vec_type: str):
     dsname_mapping = {
         "MITg": "MIT",
         "UTg": "UT",
