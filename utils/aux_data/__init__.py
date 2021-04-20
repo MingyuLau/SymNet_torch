@@ -1,6 +1,6 @@
 import importlib
 
-def load_loss_weight(dataset_name: str):
+def load_loss_weight(dataset_name: str) -> (list, list):
     """Loss weight to balance the categories
     weight = -log(frequency)"""
     
@@ -12,7 +12,7 @@ def load_loss_weight(dataset_name: str):
         raise NotImplementedError("Loss weight for %s is not implemented yet"%dataset_name)
 
 
-def load_wordvec_dict(dataset_name: str, vec_type: str):
+def load_wordvec_dict(dataset_name: str, vec_type: str) -> (dict, dict):
     dsname_mapping = {
         "MITg": "MIT",
         "UTg": "UT",

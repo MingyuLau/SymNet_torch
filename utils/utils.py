@@ -14,12 +14,12 @@ from . import aux_data
 
 # Save the training script and all the arguments to a file so that you 
 # don't feel like an idiot later when you can't replicate results
-import shutil
-def save_args(args):
-    shutil.copy('train.py', args.cv_dir)
-    shutil.copy('models/models.py', args.cv_dir)
-    with open(args.cv_dir+'/args.txt','w') as f:
-        f.write(str(args))
+# import shutil
+# def save_args(args):
+#     shutil.copy('train.py', args.cv_dir)
+#     shutil.copy('models/models.py', args.cv_dir)
+#     with open(args.cv_dir+'/args.txt','w') as f:
+#         f.write(str(args))
 
 
 
@@ -50,7 +50,7 @@ def duplication_check(args, log_dir):
         assert not osp.exists(log_dir), "log dir with same name exists (%s)"%log_dir
         
 
-def formated_czsl_result(report):
+def formated_czsl_result(report: dict):
     fstr = '[E{epoch}] rA:{real_attr_acc:.4f}|rO:{real_obj_acc:.4f}|Cl/T1:{top1_acc:.4f}|T2:{top2_acc:.4f}|T3:{top3_acc:.4f}'
 
     return fstr.format(**report)
@@ -65,7 +65,7 @@ class Embedder:
     __init__(self)
     """
 
-    def __init__(self, vec_type, vocab, data):
+    def __init__(self, vec_type: str, vocab: list, data: str):
         self.vec_type = vec_type
 
         if vec_type != 'onehot':
@@ -85,7 +85,7 @@ class Embedder:
             
             return torch.from_numpy(self.embeds).float().cuda()[i, :]
 
-    def load_word_embeddings(self, vec_type, vocab, data):
+    def load_word_embeddings(self, vec_type: str, vocab: list, data: str):
         tmp = aux_data.load_wordvec_dict(data, vec_type)
         if type(tmp) == tuple:
             attr_dict, obj_dict = tmp
@@ -111,10 +111,10 @@ class Embedder:
 #                                network utils                                 #
 ################################################################################
 
-def repeat_on(tensor, repeats, dim):
+def repeat_on(tensor: torch.Tensor, repeats: int, dim: int) -> torch.Tensor:
     return tensor.repeat_interleave(repeats, dim)
 
-def tile_on(tensor, repeats, dim):
+def tile_on(tensor: torch.Tensor, repeats: int, dim: int) -> torch.Tensor:
     repvec = [1]*len(tensor.size())
     repvec[dim] = repeats
     return tensor.repeat(*repvec)
@@ -122,7 +122,7 @@ def tile_on(tensor, repeats, dim):
     # return torch.tile(tensor, tuple(repvec))
 
 
-def activation_func(name):
+def activation_func(name: str):
     if name == "none":
         return (lambda x:x)
     elif name == "sigmoid":
@@ -181,7 +181,7 @@ def set_scheduler(args, optimizer, train_dataloader):
     return scheduler
 
     
-def clear_folder(dirname):
+def clear_folder(dirname: str):
     """clear weight and log dir"""
     logger = logging.getLogger('utils.clear_folder')
 

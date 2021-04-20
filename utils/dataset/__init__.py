@@ -4,7 +4,11 @@ from torch.utils.data import DataLoader
 import numpy as np
 
 
-def get_dataloader(dataset_name, phase, feature_file="features.t7", batchsize=1, num_workers=1, shuffle=None, **kwargs):
+def get_dataloader(dataset_name: str, phase:str, 
+                    feature_file: str="features.t7", 
+                    batchsize: int=1, num_workers: int=1, 
+                    shuffle: bool=None, **kwargs) -> DataLoader:
+
     
     if dataset_name in ["MITg", "UTg"]:
         # dataset_name = dataset_name[:-1]

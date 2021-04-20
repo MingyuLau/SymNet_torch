@@ -7,10 +7,14 @@ See `requirementes.txt`. Python 3.7 + PyTorch 1.8.1
 
 # usage
 
-UT
-
 
 MIT
+
+    python run_symnet.py --network fc_obj --name MIT_obj_lr3e-3 --data MIT --epoch 1500 --batchnorm --lr 3e-3
+
+UT
+
+    python run_symnet.py --network fc_obj --name UT_obj_lr1e-3 --data UT --epoch 300 --batchnorm --lr 1e-3
 
 
 # progress
@@ -18,8 +22,8 @@ MIT
 UT已经有正常分数了(51.3+)
 MIT14分（差很多）
 
-0. 检查snapshot读取有没有错，分数是不是合理
-1. test_symnet_czsl/test_obj
+
+1. test_obj
 2. gczsl run/test (GCZSL evaluator还没有改过，可能会有问题)
 3. 多卡训练
 
@@ -38,14 +42,15 @@ MIT14分（差很多）
 
 # TODOs
 
+1. yaml以及自动备份
 0. MSEloss在L2的时候不对：少个平方
 1. activation function和weight initializer没有设置
 3. args的key名字跟operator不太一样，可以考虑统一一下
-4. data部分可以加cache
 7. lr scheduler还没实现。如果要加的话还要存进statedict
 8. GRADIENT_CLIPPING还没实现
 9. focal loss not implemented
 10. loss的log精简一下，tb不要显示那么多（参考tf版本
 11. reshape->view
 12. symnet的compute_loss参数prob_RMD_plus, prob_RMD_minus太明显了 藏起来
-13. make this repo more Python3
+13. make this repo more Python3 (type, etc.)
+0. 检查snapshot继续训练时读取有没有错，分数是不是合理

@@ -21,7 +21,7 @@ def main():
 
     logger.info("Loading network")
     network_module = importlib.import_module('models.'+args.network)
-    model = network_module.Model(train_dataloader.dataset, args).cuda()
+    model = network_module.Model(test_dataloader.dataset, args).cuda()
     print(model)
 
     
@@ -45,7 +45,7 @@ def main():
     # trainval
     logger.info('Start evaluation')
     with torch.no_grad():
-        current_report = test_epoch(model, evaluator, test_dataloader, writer, epoch)
+        current_report = test_epoch(model, evaluator, test_dataloader, None, 0)
 
     # print test results
     print("Current: " + utils.formated_czsl_result(current_report))

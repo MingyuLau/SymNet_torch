@@ -323,9 +323,10 @@ def test_epoch(model, evaluator, dataloader, writer, epoch):
     }
 
     # save to tensorboard
-    for key, value in report_dict.items():
-        if key not in ['name', 'epoch']:
-            writer.add_scalar("score/"+key, value, epoch)
+    if writer:
+        for key, value in report_dict.items():
+            if key not in ['name', 'epoch']:
+                writer.add_scalar("score/"+key, value, epoch)
 
     return report_dict
 
