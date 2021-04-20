@@ -67,12 +67,12 @@ class TripletMarginLoss(Distance):
 
 
 class CrossEntropyLossWithProb(nn.Module):
-    def __init__(self, weight=None, clip_thres=1e-4):
+    def __init__(self, weight=None, clip_thres=1e-8):
         super(CrossEntropyLossWithProb, self).__init__()
         self.nll = nn.NLLLoss(weight)
         self.clip_thres = clip_thres
 
     def forward(self, probs, labels):
         probs = probs.clamp_min(self.clip_thres)
-        ll = probs.log()
+        ll = torch.log(probs)
         return self.nll(ll, labels)

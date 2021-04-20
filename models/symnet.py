@@ -111,7 +111,7 @@ class Model(nn.Module):
         prob_RMD_plus, prob_RMD_minus = self.RMD_prob(
             feat_plus, feat_minus,
             repeat_img_feat,
-            self.args.rmd_metric)
+            self.args.rmd_metric)   # opensource: "rmd"
 
         prob_attr = (prob_RMD_plus+prob_RMD_minus)*0.5
         
@@ -122,13 +122,13 @@ class Model(nn.Module):
 
 
         if require_loss:
-            losses = self.compute_loss(batch, pos_img, score_pos_obj, prob_RMD_plus, prob_RMD_minus)
+            losses = self.compute_loss(batch, pos_img, score_pos_obj, repeat_img_feat, feat_plus, feat_minus)
             return prob_attr, prob_obj, losses
         else:
             return prob_attr, prob_obj
 
 
-    def compute_loss(self, batch, pos_img, score_pos_obj, prob_RMD_plus, prob_RMD_minus):
+    def compute_loss(self, batch, pos_img, score_pos_obj, repeat_img_feat, feat_plus, feat_minus):
         losses = {}
 
         pos_attr_id     = batch["pos_attr_id"]
@@ -164,6 +164,8 @@ class Model(nn.Module):
             losses["loss_cls_attr/pos_rA_a"] = self.attr_ce(-score_pos_rA_A, pos_attr_id) # different implementation from TF version
 
             # rmd
+            prob_RMD_plus, prob_RMD_minus = self.RMD_prob(
+                feat_plus, feat_minus, repeat_img_feat, self.args.rmd_metric)
             losses["loss_cls_attr/rmd_plus"] = self.attr_ce_prob(prob_RMD_plus, pos_attr_id)
             losses["loss_cls_attr/rmd_minus"] = self.attr_ce_prob(prob_RMD_minus, pos_attr_id)
 
@@ -294,12 +296,7 @@ class Model(nn.Module):
             # d_minus_comp = torch.from_numpy(self.dset.comp_gamma['a']).to(self.device) * d_minus
             # d_plus_attr = torch.from_numpy(self.dset.attr_gamma['b']).to(self.device) * d_plus
             # d_minus_attr = torch.from_numpy(self.dset.attr_gamma['a']).to(self.device) * d_minus
-            d_plus_comp = d_plus
-            d_minus_comp = d_minus
-            d_plus_attr = d_plus
-            d_minus_attr = d_minus
 
-            p_comp = F.softmax(d_minus_comp - d_plus_comp, dim=1)
-            p_attr = F.softmax(d_minus_attr - d_plus_attr, dim=1)
+            p_attr = F.softmax(d_minus - d_plus, dim=1)
 
-            return p_comp, p_attr
+            return p_attr, p_attr

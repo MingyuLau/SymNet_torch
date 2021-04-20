@@ -86,7 +86,7 @@ class CompositionDatasetActivations(torch.utils.data.Dataset):
         if obj_pred is None:
             self.obj_pred = None
         else:
-            obj_pred_path = osp.join(cfg.ROOT_DIR, 'data/obj_scores', obj_pred)
+            obj_pred_path = osp.join(cfg.DATA_ROOT_DIR, 'obj_scores', obj_pred)
             print("Loading object prediction from %s"%osp.basename(obj_pred_path))
             with open(obj_pred_path, 'rb') as fp:
                 self.obj_pred = np.array(pickle.load(fp), dtype=np.float32)
@@ -144,23 +144,6 @@ class CompositionDatasetActivations(torch.utils.data.Dataset):
 
         return all_attrs, all_objs, all_pairs, tr_pairs, ts_pairs
 
-    # def sample_negative(self, attr, obj):
-    #     new_attr, new_obj = self.train_pairs[np.random.choice(len(self.train_pairs))]
-    #     if new_attr==attr and new_obj==obj:
-    #         return self.sample_negative(attr, obj)
-    #     return (self.attr2idx[new_attr], self.obj2idx[new_obj])
-
-    # def sample_affordance(self, attr, obj):
-    #     new_attr = np.random.choice(self.obj_affordance[obj])
-    #     if new_attr==attr:
-    #         return self.sample_affordance(attr, obj)
-    #     return self.attr2idx[new_attr]
-
-    # def sample_train_affordance(self, attr, obj):
-    #     new_attr = np.random.choice(self.train_obj_affordance[obj])
-    #     if new_attr==attr:
-    #         return self.sample_train_affordance(attr, obj)
-    #     return self.attr2idx[new_attr]
 
     def sample_negative(self, attr_id, obj_id):
         return np.random.choice(self.neg_pool[obj_id][attr_id])

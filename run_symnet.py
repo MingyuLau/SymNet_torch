@@ -170,7 +170,6 @@ def main():
     utils.duplication_check(args, log_dir)
     logger.info("Training ckpt and log  => "+log_dir)
     os.makedirs(log_dir, exist_ok=True)
-    writer = SummaryWriter(log_dir)
 
 
     logger.info("Loading dataset")
@@ -225,6 +224,9 @@ def main():
         main_score_key = 'top1_acc'
     best_report = None
 
+    # logger
+    writer = SummaryWriter(log_dir)
+
 
     # trainval
     logger.info('Start training')
@@ -273,7 +275,8 @@ def train_epoch(model, optimizer, dataloader, writer, epoch, max_epoch):
     
 
     for key, value in total_loss.items():
-        writer.add_scalar("loss/"+key, np.mean(value), epoch)
+        writer.add_scalar(key, np.mean(value), epoch)
+        # print(key, np.mean(value))
 
 
 
@@ -322,7 +325,7 @@ def test_epoch(model, evaluator, dataloader, writer, epoch):
     # save to tensorboard
     for key, value in report_dict.items():
         if key not in ['name', 'epoch']:
-            writer.add_scalar(key, value, epoch)
+            writer.add_scalar("score/"+key, value, epoch)
 
     return report_dict
 
