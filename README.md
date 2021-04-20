@@ -6,6 +6,17 @@ SymNet_torch development repo
 See `requirementes.txt`. Python 3.7 + PyTorch 1.8.1
 
 
+# progress
+
+UT已经有正常分数了
+MIT14分（差很多）
+
+0. 检查snapshot读取有没有错，分数是不是合理
+1. test_symnet_czsl/test_obj
+2. gczsl run/test (GCZSL evaluator还没有改过，可能会有问题)
+3. 多卡训练
+
+
 # changes
 
 1. logs和weights合并到了logs
@@ -17,7 +28,6 @@ See `requirementes.txt`. Python 3.7 + PyTorch 1.8.1
 # TODOs
 
 1. activation function和weight initializer没有设置
-2. GCZSL evaluator还没有改过，可能会有问题
 3. args的key名字跟operator不太一样，可以考虑统一一下
 4. data部分可以加cache
 7. lr scheduler还没实现。如果要加的话还要存进statedict
