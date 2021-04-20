@@ -26,9 +26,8 @@ UT已经有正常分数了(51.3+)
 MIT14分（差很多）
 
 
-1. test_obj
-2. gczsl run/test (GCZSL evaluator还没有改过，可能会有问题)
-3. 多卡训练
+1. gczsl run/test (GCZSL evaluator还没有改过，可能会有问题)
+2. 多卡训练
 
 
 # changes/notes
