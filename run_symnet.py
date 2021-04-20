@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 cudnn.benchmark = True
 
@@ -9,19 +8,9 @@ import numpy as np
 import tqdm
 import os
 import os.path as osp
-import itertools
-import glob
-
-
 import logging
 import importlib
-import re
-import copy
-import random
 import argparse
-import pickle
-from pprint import pprint
-from datetime import datetime
 from collections import defaultdict
 
 from torch.utils.tensorboard import SummaryWriter
@@ -179,10 +168,16 @@ def main():
         batchsize=args.test_bz, obj_pred=args.obj_pred)
     
 
-    logger.info("Loading network")
+    logger.info("Loading network end optimizer")
     network_module = importlib.import_module('models.'+args.network)
     model = network_module.Model(train_dataloader.dataset, args).cuda()
     print(model)
+
+    # todo: different lr on different params (refer to AttrOp code)
+    params = model.parameters()
+    optimizer = utils.get_optimizer(args.optimizer, args.lr, params)
+    # TODO: gradient clipping
+    print(optimizer)
 
     
 
@@ -194,19 +189,13 @@ def main():
         init_epoch = 0
         utils.clear_folder(log_dir)
         
-        # optimizer
-        # todo: different lr on different params (refer to AttrOp code)
-        params = model.parameters()
-        optimizer = utils.get_optimizer(args.optimizer, args.lr, params)
-        # TODO: gradient clipping
-
         # lr scheduler
         # TODO!
     else:
         # load weight
         checkpoint = torch.load(args.trained_weight)
         model.load_state_dict(checkpoint['state_dict'])
-        optimizer = checkpoint['optimizer']
+        optimizer.load_state_dict(checkpoint['optimizer'])
 
         logger.info("Checkpoint <= "+args.trained_weight)
         

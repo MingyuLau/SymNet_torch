@@ -11,6 +11,7 @@ import os.path as osp
 import logging
 import importlib
 import argparse
+import pickle
 
 from torch.utils.tensorboard import SummaryWriter
 
@@ -19,7 +20,7 @@ from utils import config as cfg
 from utils import dataset, utils
 from utils.evaluator import CZSL_Evaluator
 
-from run_symnet import make_parser, test_epoch
+from run_symnet import make_parser
 
 
 def main():
@@ -27,6 +28,8 @@ def main():
 
     # read cmd args
     parser = make_parser()
+    parser.add_argument("--test_set", type=str, default='test',
+        choices=['test','val'])
     args = parser.parse_args()
     utils.display_args(args, logger)
 
@@ -36,8 +39,8 @@ def main():
 
 
     logger.info("Loading dataset")
-    test_dataloader = dataset.get_dataloader(args.data, 'test', 
-        batchsize=args.test_bz, obj_pred=args.obj_pred)
+    test_dataloader = dataset.get_dataloader(args.data, args.test_set, 
+        batchsize=args.test_bz)
     
 
     logger.info("Loading network")
@@ -50,6 +53,7 @@ def main():
 
     # initialization (model weight, optimizer, lr_scheduler, clear logs)
 
+    
     if args.trained_weight is None:
         # load weight
         args.trained_weight = utils.CheckpointPath.compose(log_dir, args.epoch)
@@ -64,14 +68,48 @@ def main():
     evaluator = CZSL_Evaluator(test_dataloader.dataset, model)
 
 
-    # trainval
-    logger.info('Start evaluation')
-    with torch.no_grad():
-        current_report = test_epoch(model, evaluator, test_dataloader, None, 0)
+    
+    # save obj predictions
+    pklname = "%s_%s_ep%d.pt"%(args.name, args.test_set, args.epoch)
+    pklpath = osp.join(cfg.DATA_ROOT_DIR, "obj_scores", pklname)
+    assert args.force or not os.path.exists(pklpath), pklpath
+    logger.info("obj prediction => "+pklpath)
 
-    # print test results
-    print("Current: " + utils.formated_czsl_result(current_report))
+    with torch.no_grad():
+        test_epoch(model, evaluator, test_dataloader, pklpath)
+
     logger.info('Finished.')
+
+
+
+
+def test_epoch(model, evaluator, dataloader, pklpath):
+    accuracies_obj = []
+    predictions_obj = []
+
+    for _, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
+        batch = {k:v.cuda() for k,v in batch.items()}
+
+        pred_attr, pred_obj = model(batch, require_loss=False)
+
+        attr_truth, obj_truth = batch["pos_attr_id"], batch["pos_obj_id"]
+
+        _, o_match = evaluator.evaluate_only_attr_obj(
+            pred_attr, attr_truth, pred_obj, obj_truth)
+
+        accuracies_obj.append(o_match)
+        predictions_obj.append(pred_obj)
+    
+    predictions_obj = torch.cat(predictions_obj).cpu()
+
+
+    print("Saving %s tensor to %s"%(str(predictions_obj.size()), pklpath))
+    torch.save(predictions_obj, pklpath)
+
+
+    real_obj_acc = torch.mean(torch.cat(accuracies_obj)).item()
+    print("Obj acc = %.4f"%(real_obj_acc*100.))
+
 
 
 

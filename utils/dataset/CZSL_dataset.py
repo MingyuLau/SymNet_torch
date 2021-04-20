@@ -57,16 +57,6 @@ class CompositionDatasetActivations(torch.utils.data.Dataset):
             affordance = {sample["attr_name"] for sample in self.train_data+self.test_data if sample["obj_name"]==_obj}
             mask = [1 if x in affordance else 0 for x in self.attrs]
             self.obj_affordance_mask.append(mask)
-        # self.obj_affordance = {}
-        # self.train_obj_affordance = {}
-        # for _obj in self.objs:
-        #     candidates = [attr for (_, attr, obj) in self.train_data+self.test_data if obj==_obj]
-        #     self.obj_affordance[_obj] = list(set(candidates))
-        
-
-        #     candidates = [attr for (_, attr, obj) in self.train_data if obj==_obj]
-        #     self.train_obj_affordance[_obj] = list(set(candidates))
-
 
 
         # negative image pool
@@ -88,8 +78,13 @@ class CompositionDatasetActivations(torch.utils.data.Dataset):
         else:
             obj_pred_path = osp.join(cfg.DATA_ROOT_DIR, 'obj_scores', obj_pred)
             print("Loading object prediction from %s"%osp.basename(obj_pred_path))
-            with open(obj_pred_path, 'rb') as fp:
-                self.obj_pred = np.array(pickle.load(fp), dtype=np.float32)
+            if obj_pred.endswith(".pkl"):
+                # back compatible to TF version
+                with open(obj_pred_path, 'rb') as fp:
+                    self.obj_pred = np.array(pickle.load(fp), dtype=np.float32)
+            else:
+                self.obj_pred = torch.load(obj_pred_path)
+
 
 
     def get_split_info(self):

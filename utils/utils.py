@@ -46,7 +46,7 @@ def display_args(args, logger, verbose=False):
 def duplication_check(args, log_dir):
     if args.force:
         return
-    elif args.trained_weight is None or not utils.CheckpointPath.in_dir(args.trained_weight, log_dir):
+    elif args.trained_weight is None or not CheckpointPath.in_dir(args.trained_weight, log_dir):
         assert not osp.exists(log_dir), "log dir with same name exists (%s)"%log_dir
         
 
@@ -202,12 +202,12 @@ class CheckpointPath(object):
     
     def decompose(ckpt_path: str) -> (str, int):
         log_dir = osp.dirname(ckpt_path)
-        epoch = re.match(CheckpointPath.EPOCH_PATTERN, osp.basename(ckpt_path)).group(0)
+        epoch = re.match(CheckpointPath.EPOCH_PATTERN, osp.basename(ckpt_path)).group(1)
         return log_dir, int(epoch)
     
     
     def in_dir(ckpt_path: str, log_dir: str) -> bool:
-        ckpt_log_dir, _ = decompose(ckpt_path)
+        ckpt_log_dir, _ = CheckpointPath.decompose(ckpt_path)
         return osp.samefile(ckpt_log_dir, log_dir)
 
 
@@ -218,7 +218,7 @@ def snapshot(model, log_dir, optimizer, epoch):
     torch.save({
         "epoch": epoch,
         "state_dict": model.state_dict(),
-        "optimizer": optimizer,
+        "optimizer": optimizer.state_dict(),
     }, ckpt_path)
 
     logging.getLogger('utils.snapshot').info('Wrote snapshot to: {}'.format(ckpt_path))

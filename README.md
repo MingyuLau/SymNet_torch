@@ -11,10 +11,13 @@ See `requirementes.txt`. Python 3.7 + PyTorch 1.8.1
 MIT
 
     python run_symnet.py --network fc_obj --name MIT_obj_lr3e-3 --data MIT --epoch 1500 --batchnorm --lr 3e-3
+    python run_symnet.py --name MIT_best --data MIT --epoch 400 --obj_pred MIT_obj_lr3e-3_ep1120.pkl --batchnorm --lr 5e-4 --bz 512 --lambda_cls_attr 1 --lambda_cls_obj 0.01 --lambda_trip 0.03 --lambda_sym 0.05 --lambda_axiom 0.01 --rmd_metric softmax
+    
 
 UT
 
     python run_symnet.py --network fc_obj --name UT_obj_lr1e-3 --data UT --epoch 300 --batchnorm --lr 1e-3
+    python run_symnet.py --name UT_best --data UT --epoch 700 --obj_pred UT_obj_lr1e-3_ep140.pkl --batchnorm  --wordvec onehot  --lr 1e-4 --bz 256 --lambda_cls_attr 1 --lambda_cls_obj 0.5 --lambda_trip 0.5 --lambda_sym 0.01 --lambda_axiom 0.03 --rmd_metric softmax
 
 
 # progress
@@ -37,7 +40,6 @@ MIT14分（差很多）
 3. args.trained_weight现在是直接的绝对/相对路径
 4. prediction现在不是dict是只有一个list了
 5. prob_pair, prob_attr开源时是分开产生的，现在是同一个
-6. 现在test_symnet.py 用法略有不同
 
 
 # TODOs
